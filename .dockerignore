@@ -1,0 +1,14 @@
+.venv
+__pycache__/
+**/__pycache__/
+*.pyc
+.git
+.env
+.env.dev
+.env.prod
+*.pem
+temp
+stack
+*.xlsx
+~$*.xlsx
+.claude

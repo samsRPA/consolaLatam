@@ -1,0 +1,18 @@
+services:
+  consola-latam:
+    build: .
+    container_name: consola-latam
+    restart: unless-stopped
+    ports:
+      - "127.0.0.18000:8000"
+    volumes:
+      - consola_data:/data
+    env_file:
+      - .env
+    extra_hosts:
+      # Permite que el contenedor llegue a los bots de Peru/Ecuador si corren en el
+      # host (fuera de Docker) usando host.docker.internal en vez de 127.0.0.1/localhost.
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  consola_data:
