@@ -7,6 +7,8 @@
 **.env.prod
 stack
 
+**.env.example
+
 # Excel de prueba/trabajo sueltos en la raiz (datos de casos, no parte del codigo) y
 # archivos de bloqueo temporal que crea Excel mientras un .xlsx esta abierto.
 **/~$*.xlsx
