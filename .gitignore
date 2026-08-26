@@ -1,0 +1,14 @@
+**/__pycache__/
+**.env
+**.env.dev
+**.pem
+**.venv
+**temp
+**.env.prod
+stack
+
+# Excel de prueba/trabajo sueltos en la raiz (datos de casos, no parte del codigo) y
+# archivos de bloqueo temporal que crea Excel mientras un .xlsx esta abierto.
+**/~$*.xlsx
+inclusiones_test_validaciones.xlsx
+

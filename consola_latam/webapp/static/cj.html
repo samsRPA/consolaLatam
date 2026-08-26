@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Consola LATAM· Ecuador · Expedientes Judiciales</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles-ecuador.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="shell">
+  <!-- ---------- SIDEBAR ---------- -->
+  <aside class="sidebar">
+    <div class="sidebar__brand">
+      <img class="sidebar__logo" src="/static/images/LogoCj.png" alt="Consola CJ · Gestión Judicial y Legal" />
+    </div>
+    <nav class="sidebar__nav" id="sidebarNav">
+      <button class="navitem is-active" data-module="dashboard">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
+        Dashboard
+      </button>
+      <button class="navitem" data-module="clientes">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.6"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Clientes
+      </button>
+      <button class="navitem" data-module="procesos">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 4v5h5M8 13h8M8 16.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Mis Procesos
+      </button>
+      <button class="navitem" data-module="inclusiones">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Inclusiones
+      </button>
+      <button class="navitem" data-module="notificaciones">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 19a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Notificaciones
+        <span class="navitem__badge" id="navNotifBadge" hidden>0</span>
+      </button>
+      <button class="navitem" data-module="gestion">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 9.5H20.5M8 3.5V6.5M16 3.5V6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Gestión
+      </button>
+    </nav>
+    <div class="sidebar__status" id="statuslamp">
+      <span class="statuslamp__dot"></span>
+      <span class="statuslamp__label" id="statuslabel">En reposo</span>
+    </div>
+    <button class="btn btn--sm theme-toggle" id="globalSearchBtn">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.7"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <span>Buscar Ctrl+K</span>
+    </button>
+    <button class="btn btn--sm theme-toggle" id="themeToggle">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none"><path d="M20.8 13.4A8.5 8.5 0 1 1 10.6 3.2a6.8 6.8 0 0 0 10.2 10.2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" style="display:none"><circle cx="12" cy="12" r="4.3" stroke="currentColor" stroke-width="1.7"/><path d="M12 2.6v2.6M12 18.8v2.6M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.6 12h2.6M18.8 12h2.6M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <span id="themeToggleLabel">Modo oscuro</span>
+    </button>
+    <a class="btn btn--sm theme-toggle" href="/CEJ">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h14.5M18.5 8L15 4.5M20 16H5.5M5.5 16L9 19.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Cambiar a Perú</span>
+    </a>
+  </aside>
+
+  <!-- ---------- MAIN ---------- -->
+  <main class="main">
+    <!-- ===== DASHBOARD ===== -->
+    <section class="module is-active" id="module-dashboard">
+      <header class="module__head">
+        <div><h1>Dashboard</h1><p>Panorama general del sistema</p></div>
+        <button class="btn btn--ghost" id="refreshDashboard">Actualizar</button>
+      </header>
+      <div class="statgrid" id="statGrid"></div>
+      <div class="chartgrid">
+        <div class="chartcard chartcard--wide"><h3>Actividad de consultas (últimos días)</h3><canvas id="chartActivity"></canvas></div>
+        <div class="chartcard"><h3>Estado de la cartera</h3><canvas id="chartPortfolio"></canvas></div>
+        <div class="chartcard"><h3>Notificaciones por tipo</h3><canvas id="chartNotif"></canvas></div>
+        <div class="chartcard"><h3>Clientes por tipo</h3><canvas id="chartType"></canvas></div>
+        <div class="chartcard"><h3>Clientes por importancia</h3><canvas id="chartImportance"></canvas></div>
+        <div class="chartcard"><h3>Procesos más activos</h3><canvas id="chartTopActive"></canvas></div>
+        <div class="chartcard"><h3>Procesos por cliente</h3><canvas id="chartByClient"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ===== CLIENTES ===== -->
+    <section class="module" id="module-clientes">
+      <header class="module__head">
+        <div><h1>Clientes</h1><p>Carteras, bases y programaciones</p></div>
+        <button class="btn btn--solid" id="newClientBtn">+ Nuevo cliente</button>
+      </header>
+
+      <form class="inlineform card" id="clientForm" hidden>
+        <div class="formgrid">
+          <input class="field" id="clientName" placeholder="Nombre del cliente" autocomplete="off" />
+          <div class="segmented" id="clientType" data-value="">
+            <button type="button" data-val="FIRMA DE ABOGADOS">Firma</button>
+            <button type="button" data-val="FINANCIERA">Financiera</button>
+            <button type="button" data-val="COBRANZA">Cobranza</button>
+          </div>
+        </div>
+        <textarea class="field" id="clientDesc" rows="2" placeholder="Descripción / notas"></textarea>
+        <div class="segmented" id="clientImportance" data-value="MEDIA">
+          <button type="button" data-val="ALTA">Alta</button>
+          <button type="button" data-val="MEDIA" class="is-active">Media</button>
+          <button type="button" data-val="BAJA">Baja</button>
+        </div>
+        <div class="inlineform__actions">
+          <button type="submit" class="btn btn--solid">Guardar cliente</button>
+          <button type="button" class="btn btn--ghost" id="clientCancel">Cancelar</button>
+        </div>
+      </form>
+
+      <div class="split">
+        <ul class="clientlist" id="clientList"></ul>
+        <div class="clientdetail" id="clientDetail">
+          <div class="empty" id="clientEmpty">
+            <div class="empty__glyph">
+              <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" stroke-width="1.4"/></svg>
+            </div>
+            <h3>Selecciona o crea un cliente</h3>
+            <p>Dentro de cada cliente puedes cargar bases, ver sus procesos, su historial de consultas y programar seguimientos.</p>
+          </div>
+          <div id="clientWorkspace" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== MIS PROCESOS ===== -->
+    <section class="module" id="module-procesos">
+      <header class="module__head">
+        <div><h1>Mis Procesos</h1><p id="procesosCount">Repositorio jurídico completo</p></div>
+        <div class="module__head-actions">
+          <button class="btn btn--gold" id="downloadAllProc">Descargar Excel (todos)</button>
+          <button class="btn btn--danger-ghost" id="deleteAllProc">Eliminar</button>
+        </div>
+      </header>
+      <div class="toolbar" id="procToolbar">
+        <input class="field field--search" id="procSearch" placeholder="Buscar por radicado…" />
+        <select class="field field--select" id="procClientFilter"><option value="">Todos los clientes</option></select>
+      </div>
+      <div class="procgrid" id="procList"></div>
+      <div class="procdetail" id="procDetail" hidden></div>
+    </section>
+
+    <!-- ===== INCLUSIONES ===== -->
+    <section class="module" id="module-inclusiones">
+      <header class="module__head">
+        <div><h1>Inclusiones</h1><p>Agrega procesos: uno por uno o una base completa en Excel</p></div>
+      </header>
+      <div class="segmented segmented--tabs" id="inclusionTabs" data-value="individual">
+        <button type="button" data-val="individual" class="is-active">Individual</button>
+        <button type="button" data-val="masivo">Masivo (Excel)</button>
+      </div>
+
+      <form class="card inclusion-form" id="inclusionForm">
+        <label class="fieldlabel">Radicado <span class="req">obligatorio</span>
+          <input class="field" id="incRadicado" placeholder="01371202300439" autocomplete="off" />
+        </label>
+        <label class="fieldlabel">Cliente (opcional)
+          <select class="field field--select" id="incClient"><option value="">Sin asignar</option></select>
+        </label>
+        <p class="hint">El sistema completa el resto con lo que encuentre.</p>
+        <button type="submit" class="btn btn--solid">Consultar y crear proceso</button>
+      </form>
+
+      <form class="card inclusion-form" id="inclusionBulkForm" hidden>
+        <label class="fieldlabel">Cliente destino <span class="req">obligatorio</span>
+          <select class="field field--select" id="incBulkClient"><option value="">Selecciona un cliente…</option></select>
+        </label>
+        <div class="dropzone" id="incDropzone">
+          <input type="file" id="incFileInput" accept=".xlsx,.xls" hidden />
+          <div class="dropzone__inner">
+            <span class="dropzone__icon">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4L7 9M12 4L17 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </span>
+            <p><strong>Arrastra el Excel</strong> con los radicados</p>
+            <small>Radicados en la columna A desde la fila 2</small>
+          </div>
+        </div>
+        <p class="hint">El Excel se envía tal cual al bot de Ecuador, que consulta cada radicado y devuelve sus datos.</p>
+      </form>
+    </section>
+
+    <!-- ===== NOTIFICACIONES ===== -->
+    <section class="module" id="module-notificaciones">
+      <header class="module__head">
+        <div><h1>Notificaciones</h1><p id="notifSummary">Movimientos y seguimientos</p></div>
+        <div class="module__head-actions">
+          <button class="btn btn--ghost btn--sm" id="notifReadAll">Marcar todas leídas</button>
+          <button class="btn btn--ghost btn--sm" id="notifDeleteSel" disabled>Eliminar selección</button>
+          <button class="btn btn--danger-ghost btn--sm" id="notifDeleteAll">Eliminar todas</button>
+        </div>
+      </header>
+      <div class="notiffilters" id="notifFilters">
+        <button class="badge is-active" data-nf="all">Todas</button>
+        <button class="badge" data-nf="no_leidas">No leídas</button>
+        <button class="badge badge--movs" data-nf="con_movimiento">Con movimiento</button>
+        <button class="badge badge--nomovs" data-nf="sin_movimiento">Sin movimiento</button>
+        <button class="badge badge--manual" data-nf="manual">Extraer manual</button>
+      </div>
+      <div class="notiflist" id="notifList"></div>
+    </section>
+
+    <!-- ===== GESTIÓN (calendario) ===== -->
+    <section class="module" id="module-gestion">
+      <header class="module__head">
+        <div><h1>Gestión</h1><p>Control diario de tu operación: consultas, movimientos y cargas manuales</p></div>
+        <div class="module__head-actions">
+          <a class="btn btn--ghost btn--sm" id="backupExport" href="/api/ecuador/backup/export">Respaldar</a>
+          <button class="btn btn--danger-ghost btn--sm" id="backupImport">Importar respaldo</button>
+          <input type="file" id="backupImportFile" accept=".zip" hidden />
+        </div>
+      </header>
+      <div class="gestion">
+        <div class="calendar card">
+          <div class="calendar__head">
+            <button class="btn btn--ghost btn--sm" id="calPrev">←</button>
+            <h3 id="calMonthLabel">—</h3>
+            <button class="btn btn--ghost btn--sm" id="calNext">→</button>
+          </div>
+          <div class="calendar__weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+          <div class="calendar__grid" id="calGrid"></div>
+          <div class="calendar__legend">
+            <span><i class="dot dot--consulta"></i> Consultas</span>
+            <span><i class="dot dot--mov"></i> Movimientos</span>
+            <span><i class="dot dot--manual"></i> Manuales</span>
+            <span><i class="dot dot--rem"></i> Recordatorios</span>
+          </div>
+        </div>
+        <div class="daypanel card" id="dayPanel">
+          <p class="muted">Selecciona un día en el calendario para ver su detalle.</p>
+        </div>
+        <div class="weekagenda card">
+          <div class="weekagenda__head">
+            <h3>Agenda semanal</h3>
+            <span id="weekAgendaRange">—</span>
+          </div>
+          <div class="weekagenda__list" id="weekAgendaList">
+            <p class="muted">Cargando semana...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ---------- OVERLAY: CONSULTA EN VIVO ---------- -->
+<div class="console" id="console" hidden>
+  <div class="console__panel">
+    <div class="console__head">
+      <div>
+        <span class="console__eyebrow" id="consoleMode">CONSULTA TOTAL</span>
+        <h2 id="consoleBaseName">Base</h2>
+      </div>
+      <div class="console__head-actions">
+        <button class="btn btn--danger-ghost" id="consoleCancel">Cancelar</button>
+        <button class="btn btn--ghost" id="consoleClose" hidden>Cerrar</button>
+      </div>
+    </div>
+    <div class="live">
+      <div class="live__now">
+        <span class="live__label">Consultando expediente</span>
+        <div class="live__radicado" id="liveRadicado">—</div>
+        <div class="live__parte" id="liveParte">—</div>
+      </div>
+      <div class="live__counter">
+        <div class="live__count"><span id="liveDone">0</span><i>/</i><span id="liveTotal">0</span></div>
+        <span class="live__label">procesos</span>
+      </div>
+    </div>
+    <div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+    <div class="console__log" id="consoleLog"></div>
+    <div class="console__footer" id="consoleFooter" hidden>
+      <div class="console__summary" id="consoleSummary"></div>
+      <div class="console__footer-actions">
+        <button class="btn btn--ghost" id="retryErrorsBtn" hidden>Reintentar errores</button>
+        <a class="btn btn--gold" id="downloadBtn" href="#">Descargar Excel</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- BUSQUEDA GLOBAL ---------- -->
+<div class="command" id="globalSearch" hidden>
+  <div class="command__panel">
+    <input class="command__input" id="globalSearchInput" placeholder="Buscar radicado, cliente o parte..." autocomplete="off" />
+    <div class="command__results" id="globalSearchResults"></div>
+  </div>
+</div>
+
+<!-- ---------- MODAL: PROGRAMAR ---------- -->
+<div class="modal" id="scheduleModal" hidden>
+  <div class="modal__panel">
+    <div class="modal__head">
+      <h3 class="ledger">Programar consulta automática</h3>
+      <button class="btn btn--ghost" id="scheduleModalClose">✕</button>
+    </div>
+    <p class="modal__sub" id="scheduleBaseName"></p>
+    <form class="schedule-form" id="scheduleForm">
+      <div class="schedule-form__row">
+        <label>Hora<input type="number" id="schedHour" min="0" max="23" value="8" class="field field--num" /></label>
+        <label>Minuto<input type="number" id="schedMinute" min="0" max="59" value="0" class="field field--num" /></label>
+        <div class="segmented" id="schedMode" data-value="daily">
+          <button type="button" data-val="daily" class="is-active">Diaria</button>
+          <button type="button" data-val="total">Total</button>
+        </div>
+      </div>
+      <button type="submit" class="btn btn--solid">Agregar programación</button>
+    </form>
+    <ul class="schedule-list" id="scheduleList"></ul>
+  </div>
+</div>
+
+<!-- ---------- MODAL: CONFIRMAR ---------- -->
+<div class="modal" id="confirmPopup" hidden>
+  <div class="modal__panel">
+    <div class="modal__head">
+      <h3 class="ledger is-danger" id="confirmPopupTitle">⚠ Confirmar acción</h3>
+      <button class="btn btn--ghost" id="confirmPopupClose">✕</button>
+    </div>
+    <p class="modal__msg" id="confirmPopupMsg"></p>
+    <div class="modal__actions modal__actions--split">
+      <button type="button" class="btn btn--ghost" id="confirmPopupCancel">Cancelar</button>
+      <button type="button" class="btn btn--danger" id="confirmPopupOk">Sí, eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- MODAL: ERROR ---------- -->
+<div class="modal" id="errorPopup" hidden>
+  <div class="modal__panel">
+    <div class="modal__head">
+      <h3 class="ledger is-danger">⚠ Ocurrió un problema</h3>
+      <button class="btn btn--ghost" id="errorPopupClose">✕</button>
+    </div>
+    <p class="modal__msg" id="errorPopupMsg"></p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--solid" id="errorPopupOk">Entendido</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/app-ecuador.js"></script>
+</body>
+</html>

@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Consola LATAM · Selección de sede</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Manrope:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0a2050;
+      font-family: "Manrope", -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .split {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+    }
+
+    .pane {
+      position: relative;
+      width: 50%;
+      flex: none;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding-bottom: 9vh;
+      background-size: cover;
+      background-position: center;
+      overflow: hidden;
+      text-decoration: none;
+      transition: width .7s cubic-bezier(.76, 0, .24, 1);
+    }
+
+    .pane.is-expanding {
+      width: 100%;
+    }
+
+    .pane.is-collapsing {
+      width: 0%;
+      padding-left: 0;
+      padding-right: 0;
+    }
+
+    .pane.is-collapsing .pane__footer {
+      animation: none;
+      opacity: 0;
+      transition: opacity .2s ease;
+    }
+
+    .pane--ecuador {
+      background-image:
+        radial-gradient(circle at 50% 46%, rgba(10, 32, 80, .7) 0%, rgba(15, 47, 115, .32) 34%, transparent 62%),
+        linear-gradient(180deg, rgba(19, 57, 138, .48), rgba(15, 47, 115, .7)),
+        url("/static/images/CJEcuador.png");
+    }
+
+    .pane--peru {
+      background-image:
+        radial-gradient(circle at 50% 46%, rgba(90, 10, 9, .7) 0%, rgba(122, 15, 14, .32) 34%, transparent 62%),
+        linear-gradient(180deg, rgba(154, 20, 19, .48), rgba(122, 15, 14, .7)),
+        url("/static/images/loader-bg-v3.png");
+    }
+
+    .pane__footer {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      text-align: center;
+      color: #fff;
+      animation: rise .6s cubic-bezier(.16, 1, .3, 1) both;
+    }
+
+    .pane--peru .pane__footer {
+      animation-delay: .08s;
+    }
+
+    .pane__sede {
+      font-size: 11px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, .72);
+    }
+
+    .pane__country {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-weight: 600;
+      font-size: clamp(30px, 4.6vw, 54px);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin: 2px 0 4px;
+    }
+
+    .pane__org {
+      font-size: 11px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, .68);
+      margin-bottom: 22px;
+    }
+
+    .pane__btn {
+      min-width: 148px;
+      height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255, 255, 255, .74);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .12);
+      color: #fff;
+      font-family: "Manrope", sans-serif;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-decoration: none;
+      cursor: pointer;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, .22);
+      backdrop-filter: blur(5px);
+      transition: background .18s ease, transform .18s ease, border-color .18s ease;
+    }
+
+    .pane__btn:hover {
+      background: rgba(255, 255, 255, .22);
+      border-color: #fff;
+      transform: translateY(-1px);
+    }
+
+    .pane__btn:focus-visible {
+      outline: 3px solid rgba(255, 255, 255, .45);
+      outline-offset: 4px;
+    }
+
+    .brand {
+      position: absolute;
+      top: 46%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 3;
+      pointer-events: none;
+      animation: fadeIn .7s ease both;
+      transition: opacity .25s ease;
+    }
+
+    body.is-transitioning .brand {
+      animation: none;
+      opacity: 0;
+    }
+
+    .brand img {
+      display: block;
+      width: clamp(260px, 27vw, 440px);
+      max-width: 82vw;
+      height: auto;
+      filter: drop-shadow(0 10px 30px rgba(0, 0, 0, .4));
+    }
+
+    @keyframes rise {
+      from {
+        opacity: 0;
+        transform: translateY(14px);
+      }
+
+      to {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .split {
+        flex-direction: column;
+      }
+
+      .brand img {
+        width: clamp(200px, 60vw, 320px);
+      }
+
+      .brand {
+        top: 44%;
+      }
+
+      .pane {
+        width: 100%;
+        height: 50%;
+        padding-bottom: 6vh;
+        transition: height .7s cubic-bezier(.76, 0, .24, 1);
+      }
+
+      .pane.is-expanding {
+        width: 100%;
+        height: 100%;
+      }
+
+      .pane.is-collapsing {
+        width: 100%;
+        height: 0%;
+        padding-top: 0;
+        padding-bottom: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .pane,
+      .pane__footer,
+      .brand {
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="split">
+    <div class="pane pane--ecuador">
+      <div class="pane__footer">
+        <span class="pane__sede">Sede</span>
+        <h2 class="pane__country">Ecuador</h2>
+        <span class="pane__org">Función Judicial</span>
+        <a class="pane__btn" href="/CJ">Acceder</a>
+      </div>
+    </div>
+    <div class="pane pane--peru">
+      <div class="pane__footer">
+        <span class="pane__sede">Sede</span>
+        <h2 class="pane__country">Perú</h2>
+        <span class="pane__org">Poder Judicial</span>
+        <a class="pane__btn" href="/CEJ">Acceder</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="brand">
+    <img src="/static/images/logoLatam.png" alt="Consola Latam · Gestión Judicial y Legal" />
+  </div>
+
+  <script>
+    var panes = document.querySelectorAll(".pane");
+    var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var navigating = false;
+
+    panes.forEach(function (pane) {
+      var link = pane.querySelector(".pane__btn");
+      var target = link.getAttribute("href");
+
+      pane.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (navigating) return;
+        navigating = true;
+
+        if (reduceMotion) {
+          window.location.href = target;
+          return;
+        }
+
+        document.body.classList.add("is-transitioning");
+        panes.forEach(function (p) {
+          p.classList.add(p === pane ? "is-expanding" : "is-collapsing");
+        });
+
+        var navigated = false;
+        var go = function () {
+          if (navigated) return;
+          navigated = true;
+          window.location.href = target;
+        };
+        pane.addEventListener("transitionend", function onDone(ev) {
+          if (ev.propertyName !== "width" && ev.propertyName !== "height") return;
+          pane.removeEventListener("transitionend", onDone);
+          // Espera 1s con la cortina ya totalmente corrida antes de entrar al dashboard.
+          setTimeout(go, 500);
+        });
+        // Respaldo por si el navegador no dispara transitionend (pestaña en background, etc.):
+        // duración de la cortina (~700ms) + el 1s de espera + margen.
+        setTimeout(go, 1900);
+      });
+    });
+
+    // Si el usuario vuelve con "atrás", Chrome restaura la página desde el bfcache
+    // tal como quedó a mitad de la animación (navigating=true, panes con
+    // is-expanding/is-collapsing) y sin esto queda congelada sin responder a clics.
+    window.addEventListener("pageshow", function () {
+      navigating = false;
+      document.body.classList.remove("is-transitioning");
+      panes.forEach(function (p) {
+        p.classList.remove("is-expanding", "is-collapsing");
+      });
+    });
+  </script>
+
+</body>
+
+</html>
