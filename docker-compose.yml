@@ -9,10 +9,18 @@ services:
       - consola_data:/data
     env_file:
       - .env
-    extra_hosts:
-      # Permite que el contenedor llegue a los bots de Peru/Ecuador si corren en el
-      # host (fuera de Docker) usando host.docker.internal en vez de 127.0.0.1/localhost.
-      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - cej_peru_CEJ_Peru_net
+      - cj_ecuador_cj_ecuador_net
 
 volumes:
   consola_data:
+
+networks:
+  # Redes externas de los bots de Peru y Ecuador (creadas por sus propios docker-compose),
+  # para llegar a ellos por nombre de contenedor en vez de pasar por el host.
+  cej_peru_CEJ_Peru_net:
+    external: true
+  cj_ecuador_cj_ecuador_net:
+    external: true
