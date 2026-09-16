@@ -104,6 +104,8 @@ CREATE TABLE IF NOT EXISTS clients (
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     importance TEXT DEFAULT 'MEDIA',
+    external_client_id TEXT DEFAULT '',
+    external_username TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bases (
@@ -261,6 +263,10 @@ CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(due_date);
 # idempotente para bases de datos creadas por versiones anteriores del aplicativo).
 _MIGRATIONS = [
     "ALTER TABLE clients ADD COLUMN client_type TEXT DEFAULT ''",
+    # external_client_id/external_username: identifican al cliente ante el bot externo
+    # (clienteId/usuario en la URL de /incluir de Ecuador). Se piden al crear el cliente.
+    "ALTER TABLE clients ADD COLUMN external_client_id TEXT DEFAULT ''",
+    "ALTER TABLE clients ADD COLUMN external_username TEXT DEFAULT ''",
     # resolved: notificaciones manuales que el usuario ya cargó a la plataforma
     # ("Auto cargado en Plataforma"). Permite restar las resueltas del total pendiente.
     "ALTER TABLE notifications ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0",
@@ -421,11 +427,16 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
 
 # ---------- clientes ----------
 
-def create_client(name: str, description: str, importance: str, client_type: str = "") -> dict[str, Any]:
+def create_client(
+    name: str, description: str, importance: str, client_type: str = "",
+    external_client_id: str = "", external_username: str = "",
+) -> dict[str, Any]:
     with _tx() as conn:
         cur = conn.execute(
-            "INSERT INTO clients (name, description, importance, client_type, created_at) VALUES (?, ?, ?, ?, ?)",
-            (name.strip(), description.strip(), importance.strip().upper() or "MEDIA", client_type.strip().upper(), _now()),
+            "INSERT INTO clients (name, description, importance, client_type, external_client_id, "
+            "external_username, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name.strip(), description.strip(), importance.strip().upper() or "MEDIA", client_type.strip().upper(),
+             external_client_id.strip(), external_username.strip(), _now()),
         )
         return get_client(cur.lastrowid)  # type: ignore[arg-type]
 

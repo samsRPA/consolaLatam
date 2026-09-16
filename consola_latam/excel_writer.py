@@ -46,10 +46,10 @@ def _append_row(ws, values) -> None:
 BRAND_EC_BLUE = "13398A"
 
 ECUADOR_HEADERS = [
-    "RADICADO", "CLIENTE", "MATERIA", "TIPO DE ACCIÓN", "DELITO/ASUNTO",
-    "JUDICATURA", "ID JUDICATURA", "CIUDAD", "FECHA DE INGRESO", "ACTORES", "DEMANDADOS",
+    "PROCESO ID", "RADICADO", "RADICADO CON GUIONES", "CLIENTE", "MATERIA", "TIPO DE ACCIÓN", "DELITO/ASUNTO",
+    "JUDICATURA", "ID JUDICATURA", "CIUDAD", "FECHA DE INGRESO", "ACTORES", "DEMANDADOS", "ERROR",
 ]
-ECUADOR_COL_WIDTHS = [18, 22, 12, 16, 34, 46, 14, 14, 18, 34, 34]
+ECUADOR_COL_WIDTHS = [14, 18, 20, 22, 12, 16, 34, 46, 14, 14, 18, 34, 34, 34]
 
 
 def write_ecuador_processes_workbook(processes: list[dict], output_path: Path) -> None:
@@ -61,7 +61,9 @@ def write_ecuador_processes_workbook(processes: list[dict], output_path: Path) -
     for proc in processes:
         detail = proc.get("detail") or {}
         reporte = detail.get("reporte") or {}
+        proceso_id = detail.get("procesoId")
         radicado = proc.get("radicado", "")
+        radicado_con_guiones = detail.get("radicadoConGuiones", "")
         cliente = proc.get("client_name", "")
         materia = reporte.get("Materia") or proc.get("materia", "")
         tipo_accion = reporte.get("Tipo de Acción") or proc.get("estado", "")
@@ -69,6 +71,7 @@ def write_ecuador_processes_workbook(processes: list[dict], output_path: Path) -
         judicatura = reporte.get("Judicatura") or proc.get("organo", "")
         ciudad = reporte.get("Ciudad", "")
         fecha_ingreso = reporte.get("Fecha de Ingreso", "")
+        error = detail.get("error", "")
         # Un radicado puede traer varios expedientes (uno por idJudicatura), cada uno con su
         # propia judicatura/ciudad; se repite la fila con los datos comunes del radicado y
         # cambian idJudicatura/judicatura/ciudad/actores/demandados. Si el expediente no trae
@@ -76,11 +79,12 @@ def write_ecuador_processes_workbook(processes: list[dict], output_path: Path) -
         expedientes = detail.get("expedientes") or [{}]
         for exp in expedientes:
             _append_row(ws, [
-                radicado, cliente, materia, tipo_accion, delito_asunto,
+                proceso_id, radicado, radicado_con_guiones, cliente, materia, tipo_accion, delito_asunto,
                 exp.get("nombreJudicatura") or judicatura, exp.get("idJudicatura", ""),
                 exp.get("ciudad") or ciudad, fecha_ingreso,
                 "; ".join(exp.get("actores") or []),
                 "; ".join(exp.get("demandados") or []),
+                error,
             ])
     for idx, width in enumerate(ECUADOR_COL_WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width

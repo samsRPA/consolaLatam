@@ -4,8 +4,12 @@ expone dos endpoints HTTP que consultan el portal por su cuenta (via RabbitMQ) y
 responden de forma sincrona con los radicados encontrados.
 
 Endpoints del bot (documentados por quien lo opera, no forman parte de este repo):
-  POST {BASE_URL}/api/v2/radicadosCJ/{caseNumber}/incluir        -> un radicado
-  POST {BASE_URL}/api/v2/radicadosCJ/inclusiones (multipart file) -> lote via Excel
+  POST {BASE_URL}/api/v2/radicadosCJ/{caseNumber}/incluir?clienteId=..&usuario=..        -> un radicado
+  POST {BASE_URL}/api/v2/radicadosCJ/inclusiones?clienteId=..&usuario=.. (multipart file) -> lote via Excel
+
+clienteId/usuario identifican, ante el bot, al cliente (de la cartera de la firma) al que
+pertenece la inclusion; salen de los campos external_client_id/external_username del
+cliente seleccionado en la consola (ver app.py:_ecuador_bot_identity y db.py).
 
 Ambos responden 200 con:
   {"batchId": "...", "total": N, "radicados": [ {radicado, materia, fechaIngreso,
@@ -56,15 +60,19 @@ def _post_with_retry(url: str, *, timeout: float, **kwargs: Any) -> dict:
     )
 
 
-def incluir_individual(radicado: str, timeout: float = DEFAULT_TIMEOUT) -> dict:
+def incluir_individual(radicado: str, cliente_id: str, usuario: str, timeout: float = DEFAULT_TIMEOUT) -> dict:
     url = f"{BASE_URL}/api/v2/radicadosCJ/{radicado}/incluir"
-    return _post_with_retry(url, timeout=timeout)
+    params = {"clienteId": cliente_id, "usuario": usuario}
+    return _post_with_retry(url, timeout=timeout, params=params)
 
 
-def incluir_bulk(file_bytes: bytes, filename: str, timeout: float = DEFAULT_TIMEOUT) -> dict:
+def incluir_bulk(
+    file_bytes: bytes, filename: str, cliente_id: str, usuario: str, timeout: float = DEFAULT_TIMEOUT
+) -> dict:
     url = f"{BASE_URL}/api/v2/radicadosCJ/inclusiones"
+    params = {"clienteId": cliente_id, "usuario": usuario}
     files = {"file": (filename, file_bytes)}
-    return _post_with_retry(url, timeout=timeout, files=files)
+    return _post_with_retry(url, timeout=timeout, params=params, files=files)
 
 
 def persist_radicado(radicado: dict, client_id: int | None) -> dict:
@@ -81,8 +89,10 @@ def persist_radicado(radicado: dict, client_id: int | None) -> dict:
     proceso en el front los usen por expediente en vez de los campos de nivel radicado
     (que el bot puede mandar en null cuando hay mas de un expediente)."""
     numero = str(radicado.get("radicado", "")).strip()
-    judicatura = radicado.get("judicatura", "") or ""
-    ciudad = radicado.get("ciudad", "") or ""
+    # El bot ha usado ambos nombres para estos dos campos segun la version/respuesta
+    # (judicatura/ciudad y despachoNombre/localidadNombre); se aceptan los dos.
+    judicatura = radicado.get("judicatura") or radicado.get("despachoNombre") or ""
+    ciudad = radicado.get("ciudad") or radicado.get("localidadNombre") or ""
     reporte = {
         "Materia": radicado.get("materia", "") or "",
         "Fecha de Ingreso": radicado.get("fechaIngreso", "") or "",
@@ -101,6 +111,19 @@ def persist_radicado(radicado: dict, client_id: int | None) -> dict:
         materia=radicado.get("materia", "") or "",
         estado=radicado.get("tipoAccion", "") or "",
         nro_registro="",
-        detail={"reporte": reporte, "partes": [], "expedientes": radicado.get("expedientes") or []},
+        detail={
+            "reporte": reporte,
+            "partes": [],
+            "expedientes": radicado.get("expedientes") or [],
+            # error: el bot puede devolver el radicado con sus datos Y un error (ej. no
+            # pudo incluirlo en el sistema aunque si lo encontro) -- se guarda tal cual
+            # para revisarlo despues en "Mis Procesos" o en el Excel de descarga.
+            "error": radicado.get("error", "") or "",
+            "radicadoConGuiones": radicado.get("radicadoConGuiones", "") or "",
+            # procesoId: id que el bot asigna al incluirlo en su propio sistema. Si hubo
+            # error el bot no lo entrega, asi que queda en None (no "" -- distingue "no
+            # se genero" de "se genero vacio").
+            "procesoId": radicado.get("procesoId"),
+        },
         source="ecuador_bot",
     )

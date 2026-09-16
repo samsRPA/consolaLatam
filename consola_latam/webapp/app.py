@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import shutil
 import time
 import zipfile
@@ -108,11 +109,15 @@ def api_list_clients() -> list[dict]:
 @api_router.post("/clients")
 def api_create_client(
     name: str = Form(...), description: str = Form(""), importance: str = Form("MEDIA"),
-    client_type: str = Form(""),
+    client_type: str = Form(""), external_client_id: str = Form(...), external_username: str = Form(...),
 ) -> dict:
     if not name.strip():
         raise HTTPException(400, "El nombre del cliente es obligatorio")
-    return db.create_client(name, description, importance, client_type)
+    if not external_client_id.strip():
+        raise HTTPException(400, "El Cliente ID es obligatorio")
+    if not external_username.strip():
+        raise HTTPException(400, "El Usuario es obligatorio")
+    return db.create_client(name, description, importance, client_type, external_client_id, external_username)
 
 
 @api_router.delete("/clients/{client_id}")
@@ -596,13 +601,37 @@ def _require_ecuador() -> None:
         raise HTTPException(400, "Este endpoint es exclusivo de la sede Ecuador")
 
 
-@api_router.post("/inclusiones/bot")
-def api_inclusion_ecuador(radicado: str = Form(...), client_id: int | None = Form(None)) -> dict:
-    _require_ecuador()
-    if not radicado.strip():
-        raise HTTPException(400, "El radicado es obligatorio")
+# Formato que exige el bot para el radicado individual (con guiones), ej. 17230-2020-08857.
+INCLUSION_CASE_NUMBER_PATTERN = re.compile(r"^\d{5}-\d{4}-\d{5}$")
+
+
+def _ecuador_bot_identity(client_id: int) -> tuple[str, str]:
+    """Resuelve el clienteId/usuario que el bot de Ecuador exige en /incluir a partir del
+    cliente interno seleccionado (ver ecuador_client.py)."""
     try:
-        data = ecuador_client.incluir_individual(radicado.strip())
+        client = db.get_client(client_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    cliente_id = str(client.get("external_client_id") or "").strip()
+    usuario = str(client.get("external_username") or "").strip()
+    if not cliente_id or not usuario:
+        raise HTTPException(
+            400, "El cliente seleccionado no tiene Cliente ID/Usuario configurados; edítalo antes de incluir"
+        )
+    return cliente_id, usuario
+
+
+@api_router.post("/inclusiones/bot")
+def api_inclusion_ecuador(radicado: str = Form(...), client_id: int = Form(...)) -> dict:
+    _require_ecuador()
+    radicado = radicado.strip()
+    if not radicado:
+        raise HTTPException(400, "El radicado es obligatorio")
+    if not INCLUSION_CASE_NUMBER_PATTERN.match(radicado):
+        raise HTTPException(400, "El radicado debe tener el formato NNNNN-NNNN-NNNNN (ej. 17230-2020-08857)")
+    cliente_id, usuario = _ecuador_bot_identity(client_id)
+    try:
+        data = ecuador_client.incluir_individual(radicado, cliente_id, usuario)
     except ecuador_client.EcuadorBotError as exc:
         raise HTTPException(502, str(exc))
     procesados = [ecuador_client.persist_radicado(r, client_id) for r in data.get("radicados", [])]
@@ -610,13 +639,14 @@ def api_inclusion_ecuador(radicado: str = Form(...), client_id: int | None = For
 
 
 @api_router.post("/inclusiones/bot/bulk")
-async def api_inclusion_ecuador_bulk(file: UploadFile = File(...), client_id: int | None = Form(None)) -> dict:
+async def api_inclusion_ecuador_bulk(file: UploadFile = File(...), client_id: int = Form(...)) -> dict:
     _require_ecuador()
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Sube un archivo Excel (.xlsx/.xls)")
+    cliente_id, usuario = _ecuador_bot_identity(client_id)
     content = await file.read()
     try:
-        data = ecuador_client.incluir_bulk(content, file.filename)
+        data = ecuador_client.incluir_bulk(content, file.filename, cliente_id, usuario)
     except ecuador_client.EcuadorBotError as exc:
         raise HTTPException(502, str(exc))
     procesados = [ecuador_client.persist_radicado(r, client_id) for r in data.get("radicados", [])]

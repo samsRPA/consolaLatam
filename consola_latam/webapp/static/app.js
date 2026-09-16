@@ -579,14 +579,19 @@ $("#clientCancel").addEventListener("click", () => ($("#clientForm").hidden = tr
 $("#clientForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#clientName").value.trim();
+  const externalClientId = $("#clientExternalId").value.trim();
+  const externalUsername = $("#clientExternalUser").value.trim();
   if (!name) return toast("El nombre es obligatorio");
+  if (!externalClientId || !externalUsername) return toast("Cliente ID y Usuario son obligatorios");
   try {
     await api("/api/peru/clients", { method: "POST", body: form({
       name, description: $("#clientDesc").value,
       importance: $("#clientImportance").dataset.value,
       client_type: $("#clientType").dataset.value,
+      external_client_id: externalClientId, external_username: externalUsername,
     }) });
     $("#clientName").value = ""; $("#clientDesc").value = "";
+    $("#clientExternalId").value = ""; $("#clientExternalUser").value = "";
     $("#clientForm").hidden = true;
     await loadClients();
     toast("Cliente creado", true);
@@ -612,6 +617,7 @@ async function renderClientWorkspace() {
         ${c.client_type ? `<span class="chip chip--type">${esc(c.client_type)}</span>` : ""}
         <h2 class="client-header__name">${esc(c.name)}</h2>
         <p class="client-header__desc">${esc(c.description || "")}</p>
+        <p class="client-header__desc">Cliente ID: ${esc(c.external_client_id || "—")} · Usuario: ${esc(c.external_username || "—")}</p>
       </div>
       <div class="module__head-actions">
         <a class="btn btn--gold btn--sm" href="/api/peru/clients/${c.id}/report.pdf">Informe PDF</a>

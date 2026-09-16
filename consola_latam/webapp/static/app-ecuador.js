@@ -549,7 +549,9 @@ function fillClientSelect(sel, withAll) {
   const node = $(sel);
   if (!node) return;
   const current = node.value;
-  const opts = (withAll ? '<option value="">Todos los clientes</option>' : '<option value="">Sin asignar</option>')
+  const required = sel === "#incClient" || sel === "#incBulkClient";
+  const placeholder = withAll ? "Todos los clientes" : required ? "Selecciona un cliente…" : "Sin asignar";
+  const opts = `<option value="">${placeholder}</option>`
     + state.clients.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
   node.innerHTML = opts;
   node.value = current;
@@ -560,14 +562,19 @@ $("#clientCancel").addEventListener("click", () => ($("#clientForm").hidden = tr
 $("#clientForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#clientName").value.trim();
+  const externalClientId = $("#clientExternalId").value.trim();
+  const externalUsername = $("#clientExternalUser").value.trim();
   if (!name) return toast("El nombre es obligatorio");
+  if (!externalClientId || !externalUsername) return toast("Cliente ID y Usuario son obligatorios");
   try {
     await api("/api/ecuador/clients", { method: "POST", body: form({
       name, description: $("#clientDesc").value,
       importance: $("#clientImportance").dataset.value,
       client_type: $("#clientType").dataset.value,
+      external_client_id: externalClientId, external_username: externalUsername,
     }) });
     $("#clientName").value = ""; $("#clientDesc").value = "";
+    $("#clientExternalId").value = ""; $("#clientExternalUser").value = "";
     $("#clientForm").hidden = true;
     await loadClients();
     toast("Cliente creado", true);
@@ -593,6 +600,7 @@ async function renderClientWorkspace() {
         ${c.client_type ? `<span class="chip chip--type">${esc(c.client_type)}</span>` : ""}
         <h2 class="client-header__name">${esc(c.name)}</h2>
         <p class="client-header__desc">${esc(c.description || "")}</p>
+        <p class="client-header__desc">Cliente ID: ${esc(c.external_client_id || "—")} · Usuario: ${esc(c.external_username || "—")}</p>
       </div>
       <div class="module__head-actions">
         <a class="btn btn--gold btn--sm" href="/api/ecuador/clients/${c.id}/report.pdf">Informe PDF</a>
@@ -736,10 +744,12 @@ function buildProcessCard(p, i) {
   const card = el("div", "proccard proccard--clickable");
   card.style.animationDelay = `${i * 30}ms`;
   const manual = p.needs_manual ? `<span class="alert-manual">⚠ EXTRAER DOCUMENTO MANUALMENTE</span>` : "";
+  const procesoId = p.detail && p.detail.procesoId;
   card.innerHTML = `
     <div class="proccard__head">
       <div class="proccard__id">
         <span class="proccard__radicado">${esc(p.radicado)}</span>
+        ${procesoId ? `<span class="proccard__client">Proceso ID: ${esc(procesoId)}</span>` : ""}
         ${p.client_name ? `<span class="proccard__client">${esc(p.client_name)}</span>` : ""}
       </div>
       <div class="proccard__actions">
@@ -767,6 +777,9 @@ async function enterProcess(processId) {
 function renderProcessDetail(p) {
   const detail = $("#procDetail");
   const manual = p.needs_manual ? `<div class="alert-manual alert-manual--big">⚠ EXTRAER DOCUMENTO MANUALMENTE</div>` : "";
+  const botError = (p.detail && p.detail.error) || "";
+  const botErrorBanner = botError ? `<div class="alert-manual alert-manual--big">⚠ ${esc(botError)}</div>` : "";
+  const procesoId = p.detail && p.detail.procesoId;
   const reporte = (p.detail && p.detail.reporte) || {};
   const extra = ["Delito/Asunto", "Ciudad", "Fecha de Ingreso"]
     .filter((k) => reporte[k])
@@ -791,6 +804,7 @@ function renderProcessDetail(p) {
       <div>
         <h2 class="procdetail__radicado">${esc(p.radicado)}</h2>
         <div class="procdetail__meta">
+          ${procesoId ? `<span><b>Proceso ID:</b> ${esc(procesoId)}</span>` : ""}
           ${p.materia ? `<span><b>Materia:</b> ${esc(p.materia)}</span>` : ""}
           ${p.estado ? `<span><b>Tipo de acción:</b> ${esc(p.estado)}</span>` : ""}
           ${p.organo ? `<span><b>Judicatura:</b> ${esc(p.organo)}</span>` : ""}
@@ -804,6 +818,7 @@ function renderProcessDetail(p) {
       </div>
     </div>
     ${manual}
+    ${botErrorBanner}
     ${expedientesHtml}
     <h3 class="ledger ledger--section">Actuaciones del proceso (${p.actuaciones.length})</h3>
     <div class="acttable-wrap">
@@ -936,14 +951,17 @@ function finishBotConsole({ ok, total, error, downloadHref }) {
   }
   loadClients();
 }
+const INCLUSION_CASE_NUMBER_PATTERN = /^\d{5}-\d{4}-\d{5}$/;
 $("#inclusionForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const radicado = $("#incRadicado").value.trim();
   if (!radicado) return toast("El radicado es obligatorio");
+  if (!INCLUSION_CASE_NUMBER_PATTERN.test(radicado)) return toast("El radicado debe tener el formato NNNNN-NNNN-NNNNN (ej. 17230-2020-08857)");
   const clientId = $("#incClient").value || "";
+  if (!clientId) return toast("Selecciona un cliente");
   openBotWaitConsole(radicado);
   try {
-    const result = await api("/api/ecuador/inclusiones/bot", { method: "POST", body: form({ radicado, client_id: clientId || null }) });
+    const result = await api("/api/ecuador/inclusiones/bot", { method: "POST", body: form({ radicado, client_id: clientId }) });
     finishBotConsole({
       ok: true, total: result.total,
       downloadHref: result.process_ids.length ? `/api/ecuador/processes-download-batch?ids=${result.process_ids.join(",")}` : null,

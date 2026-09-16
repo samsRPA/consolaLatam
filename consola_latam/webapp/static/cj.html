@@ -100,6 +100,10 @@
             <button type="button" data-val="COBRANZA">Cobranza</button>
           </div>
         </div>
+        <div class="formgrid">
+          <input class="field" id="clientExternalId" placeholder="Cliente ID (bot)" autocomplete="off" />
+          <input class="field" id="clientExternalUser" placeholder="Usuario (bot)" autocomplete="off" />
+        </div>
         <textarea class="field" id="clientDesc" rows="2" placeholder="Descripción / notas"></textarea>
         <div class="segmented" id="clientImportance" data-value="MEDIA">
           <button type="button" data-val="ALTA">Alta</button>
@@ -156,10 +160,10 @@
 
       <form class="card inclusion-form" id="inclusionForm">
         <label class="fieldlabel">Radicado <span class="req">obligatorio</span>
-          <input class="field" id="incRadicado" placeholder="01371202300439" autocomplete="off" />
+          <input class="field" id="incRadicado" placeholder="17230-2020-08857" autocomplete="off" />
         </label>
-        <label class="fieldlabel">Cliente (opcional)
-          <select class="field field--select" id="incClient"><option value="">Sin asignar</option></select>
+        <label class="fieldlabel">Cliente <span class="req">obligatorio</span>
+          <select class="field field--select" id="incClient"><option value="">Selecciona un cliente…</option></select>
         </label>
         <p class="hint">El sistema completa el resto con lo que encuentre.</p>
         <button type="submit" class="btn btn--solid">Consultar y crear proceso</button>
