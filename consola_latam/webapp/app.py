@@ -650,7 +650,9 @@ def _build_documento(
 
     documento: dict = {
         "tipoDocumento": tipo_documento,
-        "numeroDocumento": int(numero_documento),
+        # Siempre texto (nunca int): un DNI como "00256282" pierde los ceros al castearlo y
+        # el bot lo rechaza por no tener 8 digitos.
+        "numeroDocumento": numero_documento,
         "fechaEmision": fecha_emision,
         "fechaNacimiento": fecha_nacimiento,
     }
