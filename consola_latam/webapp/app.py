@@ -38,6 +38,7 @@ from pathlib import Path
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from ..detect import DetectionError, detect_columns
 from ..base_reader import read_base_auto
@@ -759,7 +760,8 @@ async def api_inclusion_ecuador_bulk(
     clientes = _build_clientes_payload(client_id, _parse_hijo_ids(hijo_ids))
     content = await file.read()
     try:
-        data = ecuador_client.incluir_bulk(content, file.filename, clientes)
+        # La espera del lote puede durar mucho: en un hilo aparte para no bloquear el event loop.
+        data = await run_in_threadpool(ecuador_client.incluir_bulk, content, file.filename, clientes)
     except ecuador_client.EcuadorBotError as exc:
         raise HTTPException(502, str(exc))
     procesados = [ecuador_client.persist_radicado(r, client_id) for r in data.get("radicados", [])]

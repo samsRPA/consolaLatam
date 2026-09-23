@@ -24,11 +24,14 @@ Ambos responden con:
                                 actorsRama, valorParte}, ... ]}, ... ],
    "invalid": [ {"row": N, "reason": "..."} ]}   (invalid solo en el endpoint de lote)
 
-El endpoint individual bloquea hasta 120s del lado del bot y responde 504 si no llega a
-tiempo. El de lote NO tiene ese timeout documentado (puede tardar arbitrariamente, e
-incluso quedarse colgado si el collector nunca junta el conteo esperado) — por eso aca
-se usa un timeout de cliente generoso pero finito, para que esta app nunca quede
-esperando para siempre aunque el bot si lo haga."""
+El endpoint individual bloquea hasta 300s del lado del bot y responde 504 si no llega a
+tiempo. El de lote NO tiene timeout (puede tardar arbitrariamente) — por eso aca se usa
+un timeout de cliente generoso pero finito, para que esta app nunca quede esperando para
+siempre aunque el bot si lo haga.
+
+Solo se reintenta UNA vez si no se pudo conectar; un timeout o corte de lectura NO se
+reintenta porque el bot ya recibio la peticion: reenviarla crearia otro lote con los
+mismos radicados, y el bot cancela el lote anterior al detectar que se cerro la conexion."""
 
 from __future__ import annotations
 
@@ -42,8 +45,9 @@ from ..utils import clean_text
 from . import db
 
 BASE_URL = os.environ.get("PERU_BOT_BASE_URL", "http://127.0.0.1:5090").rstrip("/")
-INDIVIDUAL_TIMEOUT = 150.0  # el bot documenta que bloquea hasta 120s del lado suyo
-BULK_TIMEOUT = 3600.0  # sin timeout documentado del lado del bot; tope de seguridad local
+INDIVIDUAL_TIMEOUT = 330.0  # el bot espera hasta 300s la respuesta de un radicado; margen extra
+BULK_TIMEOUT = 3 * 60 * 60.0  # 3 horas: el bot no tiene timeout para el lote (Excel); tope de seguridad local
+CONNECT_TIMEOUT = 10.0
 
 
 class PeruBotError(RuntimeError):
@@ -69,16 +73,22 @@ def _format_bot_error_detail(detail: Any) -> str:
 
 
 def _post_with_retry(url: str, *, timeout: float, **kwargs: Any) -> dict:
-    """POST con UN reintento ante timeout o error de conexion (no ante un 4xx/5xx del
-    bot, que es una respuesta real y no algo transitorio que valga la pena repetir)."""
+    """POST con UN reintento solo si no se pudo conectar (la peticion no llego al bot). Un
+    timeout de lectura o un corte de conexion NO se reintenta: el bot ya recibio la
+    peticion y reenviarla duplicaria el lote (ver docstring del modulo). Un 4xx/5xx del bot
+    tampoco, es una respuesta real y no algo transitorio."""
     last_exc: Exception | None = None
     for attempt in range(2):
         try:
-            with httpx.Client(timeout=timeout) as client:
+            with httpx.Client(timeout=httpx.Timeout(timeout, connect=CONNECT_TIMEOUT)) as client:
                 resp = client.post(url, **kwargs)
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as exc:
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             last_exc = exc
             continue
+        except (httpx.TimeoutException, httpx.ReadError) as exc:
+            raise PeruBotError(
+                f"El bot no respondio en {timeout:.0f}s o corto la conexion: {exc}"
+            ) from exc
         if resp.status_code >= 400:
             detail = resp.text[:300] or "sin detalle"
             try:
