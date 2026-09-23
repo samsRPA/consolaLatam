@@ -181,7 +181,7 @@ function showModule(name) {
   if (name === "clientes") loadClients();
   if (name === "procesos") loadProcesses();
   if (name === "notificaciones") loadNotifications();
-  if (name === "inclusiones") fillClientSelect("#incClient");
+  if (name === "inclusiones") fillClientSelectForInclusion("#incClient");
   if (name === "gestion") loadGestion();
 }
 
@@ -527,7 +527,7 @@ async function loadClients() {
   state.clients = await api("/api/ecuador/clients");
   renderClients();
   fillClientSelect("#procClientFilter", true);
-  fillClientSelect("#incClient");
+  fillClientSelectForInclusion("#incClient");
 }
 function renderClients() {
   const list = $("#clientList");
@@ -549,13 +549,63 @@ function fillClientSelect(sel, withAll) {
   const node = $(sel);
   if (!node) return;
   const current = node.value;
-  const required = sel === "#incClient" || sel === "#incBulkClient";
-  const placeholder = withAll ? "Todos los clientes" : required ? "Selecciona un cliente…" : "Sin asignar";
+  const placeholder = withAll ? "Todos los clientes" : "Sin asignar";
   const opts = `<option value="">${placeholder}</option>`
     + state.clients.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
   node.innerHTML = opts;
   node.value = current;
 }
+
+/* Selects de "Cliente padre" en Inclusiones: a diferencia de fillClientSelect, muestran
+   el Cliente ID de Oracle (para identificar cual es cual entre clientes con nombres
+   parecidos) y, al elegir uno, cargan sus clientes hijos como checkboxes debajo. */
+const INC_CHILDREN_MAP = {
+  "#incClient": { block: "#incChildrenBlock", list: "#incChildren" },
+  "#incBulkClient": { block: "#incBulkChildrenBlock", list: "#incBulkChildren" },
+};
+function fillClientSelectForInclusion(sel) {
+  const node = $(sel);
+  if (!node) return;
+  const current = node.value;
+  node.innerHTML = `<option value="">Selecciona un cliente…</option>`
+    + state.clients.map((c) => `<option value="${c.id}">${esc(c.name)} · ID ${esc(c.external_client_id || "—")}</option>`).join("");
+  node.value = current;
+  loadIncChildren(sel);
+}
+async function loadIncChildren(sel) {
+  const { block: blockSel, list: listSel } = INC_CHILDREN_MAP[sel];
+  const clientId = $(sel).value;
+  const block = $(blockSel), list = $(listSel);
+  if (!clientId) { block.hidden = true; list.innerHTML = ""; return; }
+  const client = state.clients.find((c) => String(c.id) === String(clientId));
+  let children = [];
+  try { children = await api(`/api/ecuador/clients/${clientId}/children`); } catch (err) { return showErrorPopup(err.message); }
+  // El propio padre viene incluido en la jerarquia Oracle guardada -- no tiene sentido
+  // ofrecerlo de nuevo como "hijo opcional" aparte, ya va siempre en el envio.
+  children = children.filter((c) => String(c.oracle_cliente_id) !== String(client?.external_client_id || ""));
+  if (!children.length) { block.hidden = true; list.innerHTML = ""; return; }
+  block.hidden = false;
+  list.innerHTML = children.map((c) => `
+    <label class="childrow childrow--check">
+      <span class="childrow__check">
+        <input type="checkbox" value="${c.oracle_cliente_id}" />
+        <span class="childrow__name">${esc(c.nombre)}</span>
+      </span>
+      <span class="childrow__id">ID: ${esc(c.oracle_cliente_id)}</span>
+    </label>`).join("");
+}
+function selectedIncChildren(listSel) {
+  return $$(`${listSel} input[type="checkbox"]:checked`).map((cb) => cb.value).join(",");
+}
+function setIncChildrenChecked(listSel, checked) {
+  $$(`${listSel} input[type="checkbox"]`).forEach((cb) => (cb.checked = checked));
+}
+$("#incClient").addEventListener("change", () => loadIncChildren("#incClient"));
+$("#incBulkClient").addEventListener("change", () => loadIncChildren("#incBulkClient"));
+$("#incChildrenAll").addEventListener("click", () => setIncChildrenChecked("#incChildren", true));
+$("#incChildrenNone").addEventListener("click", () => setIncChildrenChecked("#incChildren", false));
+$("#incBulkChildrenAll").addEventListener("click", () => setIncChildrenChecked("#incBulkChildren", true));
+$("#incBulkChildrenNone").addEventListener("click", () => setIncChildrenChecked("#incBulkChildren", false));
 
 $("#newClientBtn").addEventListener("click", () => { $("#clientForm").hidden = !$("#clientForm").hidden; });
 $("#clientCancel").addEventListener("click", () => ($("#clientForm").hidden = true));
@@ -563,18 +613,17 @@ $("#clientForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#clientName").value.trim();
   const externalClientId = $("#clientExternalId").value.trim();
-  const externalUsername = $("#clientExternalUser").value.trim();
   if (!name) return toast("El nombre es obligatorio");
-  if (!externalClientId || !externalUsername) return toast("Cliente ID y Usuario son obligatorios");
+  if (!externalClientId) return toast("El Cliente ID es obligatorio");
   try {
     await api("/api/ecuador/clients", { method: "POST", body: form({
       name, description: $("#clientDesc").value,
       importance: $("#clientImportance").dataset.value,
       client_type: $("#clientType").dataset.value,
-      external_client_id: externalClientId, external_username: externalUsername,
+      external_client_id: externalClientId,
     }) });
     $("#clientName").value = ""; $("#clientDesc").value = "";
-    $("#clientExternalId").value = ""; $("#clientExternalUser").value = "";
+    $("#clientExternalId").value = "";
     $("#clientForm").hidden = true;
     await loadClients();
     toast("Cliente creado", true);
@@ -600,7 +649,7 @@ async function renderClientWorkspace() {
         ${c.client_type ? `<span class="chip chip--type">${esc(c.client_type)}</span>` : ""}
         <h2 class="client-header__name">${esc(c.name)}</h2>
         <p class="client-header__desc">${esc(c.description || "")}</p>
-        <p class="client-header__desc">Cliente ID: ${esc(c.external_client_id || "—")} · Usuario: ${esc(c.external_username || "—")}</p>
+        <p class="client-header__desc">Cliente ID: ${esc(c.external_client_id || "—")} · Nombre Oracle: ${esc(c.external_username || "—")}</p>
       </div>
       <div class="module__head-actions">
         <a class="btn btn--gold btn--sm" href="/api/ecuador/clients/${c.id}/report.pdf">Informe PDF</a>
@@ -619,11 +668,18 @@ async function renderClientWorkspace() {
     </div>
     <h3 class="ledger ledger--section">Bases del cliente</h3>
     <div class="baselist" id="baseList"></div>
+    <div class="section-head">
+      <h3 class="ledger ledger--section" id="childrenHeading">Clientes hijos (Oracle)</h3>
+      <button type="button" class="btn btn--ghost btn--sm" id="refreshChildrenBtn">↻ Actualizar</button>
+    </div>
+    <div class="childrenlist" id="childrenList"></div>
     <h3 class="ledger ledger--section">Historial de consultas</h3>
     <div class="historylist" id="historyList"></div>`;
   wireDropzone();
   $("#deleteClientBtn").addEventListener("click", deleteActiveClient);
+  $("#refreshChildrenBtn").addEventListener("click", refreshClientChildren);
   await loadBases();
+  await loadClientChildren();
   await loadHistory();
 }
 
@@ -650,6 +706,35 @@ async function loadHistory() {
       <span class="historyrow__counts">${h.total} proc · <b>${h.con_mov}</b> con mov · ${h.sin_mov} sin · ${h.errores} err</span>
       <span class="historyrow__date">${esc((h.created_at || "").replace("T", " "))}</span>
     </div>`).join("");
+}
+
+function renderClientChildren(list) {
+  const wrap = $("#childrenList");
+  $("#childrenHeading").textContent = `Clientes hijos (Oracle)${list.length ? " · " + list.length : ""}`;
+  if (!list.length) { wrap.innerHTML = `<p class="muted">Sin clientes hijos con facturación activa en Oracle.</p>`; return; }
+  wrap.innerHTML = list.map((h) => `
+    <div class="childrow">
+      <span class="childrow__name" title="${esc(h.nombre)}">${esc(h.nombre)}</span>
+      <span class="childrow__id">ID: ${esc(h.oracle_cliente_id)}</span>
+    </div>`).join("");
+}
+async function loadClientChildren() {
+  renderClientChildren(await api(`/api/ecuador/clients/${state.activeClient.id}/children`));
+}
+async function refreshClientChildren() {
+  const btn = $("#refreshChildrenBtn");
+  btn.disabled = true;
+  btn.textContent = "Consultando…";
+  try {
+    const list = await api(`/api/ecuador/clients/${state.activeClient.id}/children/refresh`, { method: "POST" });
+    renderClientChildren(list);
+    toast("Clientes hijos actualizados", true);
+  } catch (err) {
+    showErrorPopup(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "↻ Actualizar";
+  }
 }
 
 /* ---------- bases (dentro de cliente) ---------- */
@@ -798,6 +883,22 @@ function renderProcessDetail(p) {
           <div class="expcard__row"><b>Demandados</b>${(e.demandados && e.demandados.length) ? esc(e.demandados.join(", ")) : "—"}</div>
         </div>`).join("")}
     </div>` : "";
+  // El proceso solo tiene Proceso ID de Oracle si se creo via inclusion al bot (ver
+  // ecuador_client.persist_radicado); sin eso PROCESOS_CLIENTES no tiene a que engancharse.
+  const oracleClientesHtml = procesoId ? `
+    <h3 class="ledger ledger--section">Clientes asociados (Oracle)</h3>
+    <div class="childrenlist" id="procOracleClientes"><p class="muted">Cargando…</p></div>
+    <div class="card inclusion-form" id="procAddClienteCard" style="margin-top:14px">
+      <label class="fieldlabel" style="margin:0 0 8px">Agregar cliente al proceso</label>
+      <div class="formgrid">
+        <select class="field field--select" id="procClientPicker"><option value="">Elegir de mis clientes…</option></select>
+        <div style="display:flex; gap:8px;">
+          <input class="field" id="procClienteIdInput" placeholder="o escribe un Cliente ID de Oracle" inputmode="numeric" autocomplete="off" />
+          <button type="button" class="btn btn--ghost" id="procClienteBuscar">Buscar</button>
+        </div>
+      </div>
+      <div id="procClienteResult"></div>
+    </div>` : "";
   detail.innerHTML = `
     <button class="btn btn--ghost btn--sm" id="procBack">← Volver a la lista</button>
     <div class="procdetail__head">
@@ -820,6 +921,7 @@ function renderProcessDetail(p) {
     ${manual}
     ${botErrorBanner}
     ${expedientesHtml}
+    ${oracleClientesHtml}
     <h3 class="ledger ledger--section">Actuaciones del proceso (${p.actuaciones.length})</h3>
     <div class="acttable-wrap">
       ${p.actuaciones.length ? `<table class="acttable">
@@ -854,6 +956,99 @@ function renderProcessDetail(p) {
       } catch (err) { showErrorPopup(err.message); }
     });
   });
+  initProcOracleClientes(p);
+}
+
+/* ---------- clientes de un proceso en Oracle (PROCESOS_CLIENTES) ---------- */
+let procOracleLookup = null;
+function initProcOracleClientes(p) {
+  const procesoId = p.detail && p.detail.procesoId;
+  if (!procesoId) return; // sin Proceso ID de Oracle no hay a que asociar clientes
+  procOracleLookup = null;
+  loadProcOracleClientes(p.id);
+  const picker = $("#procClientPicker");
+  picker.innerHTML = `<option value="">Elegir de mis clientes…</option>`
+    + state.clients.map((c) => `<option value="${esc(c.external_client_id || "")}">${esc(c.name)} · ID ${esc(c.external_client_id || "—")}</option>`).join("");
+  picker.addEventListener("change", () => {
+    if (picker.value) { $("#procClienteIdInput").value = picker.value; buscarOracleCliente(p.id); }
+  });
+  $("#procClienteBuscar").addEventListener("click", () => buscarOracleCliente(p.id));
+}
+async function loadProcOracleClientes(processId) {
+  const wrap = $("#procOracleClientes");
+  let list;
+  try { list = await api(`/api/ecuador/processes/${processId}/oracle-clientes`); }
+  catch (err) { wrap.innerHTML = `<p class="muted">No se pudo cargar (${esc(err.message)}).</p>`; return; }
+  if (!list.length) { wrap.innerHTML = `<p class="muted">Sin clientes asociados todavía en Oracle.</p>`; return; }
+  wrap.innerHTML = list.map((c) => `
+    <div class="childrow">
+      <span class="childrow__name">${esc(c.nombre)}</span>
+      <span class="childrow__id">ID: ${esc(c.cliente_id)}</span>
+    </div>`).join("");
+}
+async function buscarOracleCliente(processId) {
+  const input = $("#procClienteIdInput");
+  const clienteId = input.value.trim();
+  const result = $("#procClienteResult");
+  if (!clienteId || !/^\d+$/.test(clienteId)) return toast("Escribe un Cliente ID numérico");
+  result.innerHTML = `<p class="muted">Consultando Oracle…</p>`;
+  try {
+    procOracleLookup = await api(`/api/ecuador/oracle-clientes/${clienteId}/lookup`);
+  } catch (err) {
+    procOracleLookup = null;
+    result.innerHTML = `<p class="hint" style="color:var(--danger)">${esc(err.message)}</p>`;
+    return;
+  }
+  const hijosHtml = procOracleLookup.hijos.length ? `
+    <div class="section-head">
+      <span class="fieldlabel" style="margin:0">Clientes hijos <small class="hint">(opcional)</small></span>
+      <span class="module__head-actions">
+        <button type="button" class="btn btn--ghost btn--sm" id="procResultChildrenAll">Marcar todos</button>
+        <button type="button" class="btn btn--ghost btn--sm" id="procResultChildrenNone">Ninguno</button>
+      </span>
+    </div>
+    <div class="childrenlist" id="procResultChildren">
+      ${procOracleLookup.hijos.map((h) => `
+        <label class="childrow childrow--check">
+          <span class="childrow__check">
+            <input type="checkbox" value="${h.cliente_id}" />
+            <span class="childrow__name">${esc(h.nombre)}</span>
+          </span>
+          <span class="childrow__id">ID: ${esc(h.cliente_id)}</span>
+        </label>`).join("")}
+    </div>` : "";
+  result.innerHTML = `
+    <p class="hint">Encontrado: <b>${esc(procOracleLookup.nombre)}</b> (ID ${esc(procOracleLookup.cliente_id)})</p>
+    ${hijosHtml}
+    <button type="button" class="btn btn--solid btn--sm" id="procClienteAgregarBtn">Agregar cliente(s) al proceso</button>`;
+  if (procOracleLookup.hijos.length) {
+    $("#procResultChildrenAll").addEventListener("click", () => setIncChildrenChecked("#procResultChildren", true));
+    $("#procResultChildrenNone").addEventListener("click", () => setIncChildrenChecked("#procResultChildren", false));
+  }
+  $("#procClienteAgregarBtn").addEventListener("click", () => agregarOracleClientesAlProceso(processId));
+}
+async function agregarOracleClientesAlProceso(processId) {
+  if (!procOracleLookup) return;
+  const clientes = [{ cliente_id: procOracleLookup.cliente_id, nombre: procOracleLookup.nombre }];
+  selectedIncChildren("#procResultChildren").split(",").filter(Boolean).forEach((id) => {
+    const hijo = procOracleLookup.hijos.find((h) => String(h.cliente_id) === id);
+    if (hijo) clientes.push({ cliente_id: hijo.cliente_id, nombre: hijo.nombre });
+  });
+  try {
+    const result = await api(`/api/ecuador/processes/${processId}/oracle-clientes`, {
+      method: "POST", body: form({ clientes: JSON.stringify(clientes) }),
+    });
+    toast(result.omitidos.length
+      ? `Agregados: ${result.agregados.length}. Ya estaban asociados: ${result.omitidos.length}.`
+      : `Agregados: ${result.agregados.length}.`, true);
+    $("#procClienteIdInput").value = "";
+    $("#procClientPicker").value = "";
+    $("#procClienteResult").innerHTML = "";
+    procOracleLookup = null;
+    loadProcOracleClientes(processId);
+  } catch (err) {
+    showErrorPopup(err.message);
+  }
 }
 function actAttachmentHtml(a) {
   const link = a.attachment_path
@@ -959,9 +1154,10 @@ $("#inclusionForm").addEventListener("submit", async (e) => {
   if (!INCLUSION_CASE_NUMBER_PATTERN.test(radicado)) return toast("El radicado debe tener el formato NNNNN-NNNN-NNNNN (ej. 17230-2020-08857)");
   const clientId = $("#incClient").value || "";
   if (!clientId) return toast("Selecciona un cliente");
+  const hijoIds = selectedIncChildren("#incChildren");
   openBotWaitConsole(radicado);
   try {
-    const result = await api("/api/ecuador/inclusiones/bot", { method: "POST", body: form({ radicado, client_id: clientId }) });
+    const result = await api("/api/ecuador/inclusiones/bot", { method: "POST", body: form({ radicado, client_id: clientId, hijo_ids: hijoIds }) });
     finishBotConsole({
       ok: true, total: result.total,
       downloadHref: result.process_ids.length ? `/api/ecuador/processes-download-batch?ids=${result.process_ids.join(",")}` : null,
@@ -979,7 +1175,7 @@ $("#inclusionTabs").addEventListener("click", (e) => {
   const masivo = b.dataset.val === "masivo";
   $("#inclusionForm").hidden = masivo;
   $("#inclusionBulkForm").hidden = !masivo;
-  if (masivo) fillClientSelect("#incBulkClient");
+  if (masivo) fillClientSelectForInclusion("#incBulkClient");
 });
 /* carga masiva por Excel dentro de Inclusiones: el Excel se manda tal cual al bot,
    que hace su propia lectura (radicados en columna A desde la fila 2). */
@@ -996,10 +1192,11 @@ async function bulkInclude(file) {
   const clientId = $("#incBulkClient").value;
   if (!clientId) return toast("Selecciona el cliente destino primero");
   if (!/\.xlsx?$/i.test(file.name)) return toast("Debe ser un archivo Excel (.xlsx)");
+  const hijoIds = selectedIncChildren("#incBulkChildren");
   $("#incFileInput").value = "";
   openBotWaitConsole(file.name);
   try {
-    const result = await api("/api/ecuador/inclusiones/bot/bulk", { method: "POST", body: form({ file, client_id: clientId }) });
+    const result = await api("/api/ecuador/inclusiones/bot/bulk", { method: "POST", body: form({ file, client_id: clientId, hijo_ids: hijoIds }) });
     finishBotConsole({
       ok: true, total: result.total,
       downloadHref: result.process_ids.length ? `/api/ecuador/processes-download-batch?ids=${result.process_ids.join(",")}` : null,

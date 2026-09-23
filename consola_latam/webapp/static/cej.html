@@ -101,8 +101,7 @@
           </div>
         </div>
         <div class="formgrid">
-          <input class="field" id="clientExternalId" placeholder="Cliente ID (bot)" autocomplete="off" />
-          <input class="field" id="clientExternalUser" placeholder="Usuario (bot)" autocomplete="off" />
+          <input class="field" id="clientExternalId" placeholder="Cliente ID" autocomplete="off" inputmode="numeric" />
         </div>
         <textarea class="field" id="clientDesc" rows="2" placeholder="Descripción / notas"></textarea>
         <div class="segmented" id="clientImportance" data-value="MEDIA">
@@ -170,35 +169,51 @@
             <input class="field" id="incDemandado" placeholder="Nombre del demandado" autocomplete="off" />
           </label>
         </div>
-        <label class="fieldlabel">Valor parte (opcional)
+        <label class="fieldlabel">Valor parte (opcional) <small class="hint">(recomendado: llenarlo acelera el proceso)</small>
           <input class="field" id="incValorParte" placeholder="Ej. TINTAYA SOTO" autocomplete="off" />
         </label>
-        <div class="formgrid">
-          <label class="fieldlabel">Tipo de documento <span class="req">obligatorio</span>
-            <select class="field field--select" id="incTipoDocumento">
-              <option value="">Selecciona…</option>
-              <option value="DNI">DNI</option>
-              <option value="CE">Carné de Extranjería (CE)</option>
-            </select>
-          </label>
-          <label class="fieldlabel">Número de documento <span class="req">obligatorio</span>
-            <input class="field" id="incNumeroDocumento" placeholder="Ej. 12345678" inputmode="numeric" autocomplete="off" />
-          </label>
-        </div>
-        <label class="fieldlabel" id="incCodigoWrap" hidden>Código <span class="req">obligatorio</span>
-          <input class="field" id="incCodigo" placeholder="Código" inputmode="numeric" autocomplete="off" />
+        <label class="checktoggle">
+          <input type="checkbox" id="incDocumentoToggle" />
+          Elegir datos del documento <small class="hint">(si no, se usa un documento por defecto)</small>
         </label>
-        <div class="formgrid">
-          <label class="fieldlabel">Fecha de emisión <span class="req">obligatorio</span>
-            <input class="field" type="date" id="incFechaEmision" autocomplete="off" />
+        <div id="incDocumentoFields" hidden>
+          <div class="formgrid">
+            <label class="fieldlabel">Tipo de documento
+              <select class="field field--select" id="incTipoDocumento">
+                <option value="">Selecciona…</option>
+                <option value="DNI">DNI</option>
+                <option value="CE">Carné de Extranjería (CE)</option>
+              </select>
+            </label>
+            <label class="fieldlabel">Número de documento
+              <input class="field" id="incNumeroDocumento" placeholder="Ej. 12345678" inputmode="numeric" autocomplete="off" />
+            </label>
+          </div>
+          <label class="fieldlabel" id="incCodigoWrap" hidden>Código <span class="req">obligatorio</span>
+            <input class="field" id="incCodigo" placeholder="Código" inputmode="numeric" autocomplete="off" />
           </label>
-          <label class="fieldlabel">Fecha de nacimiento <span class="req">obligatorio</span>
-            <input class="field" type="date" id="incFechaNacimiento" autocomplete="off" />
-          </label>
+          <div class="formgrid">
+            <label class="fieldlabel">Fecha de emisión
+              <input class="field" type="date" id="incFechaEmision" autocomplete="off" />
+            </label>
+            <label class="fieldlabel">Fecha de nacimiento
+              <input class="field" type="date" id="incFechaNacimiento" autocomplete="off" />
+            </label>
+          </div>
         </div>
-        <label class="fieldlabel">Cliente (opcional)
-          <select class="field field--select" id="incClient"><option value="">Sin asignar</option></select>
+        <label class="fieldlabel">Cliente <span class="req">obligatorio</span>
+          <select class="field field--select" id="incClient"><option value="">Selecciona un cliente…</option></select>
         </label>
+        <div class="inc-children" id="incChildrenBlock" hidden>
+          <div class="section-head">
+            <span class="fieldlabel" style="margin:0">Clientes hijos <small class="hint">(opcional)</small></span>
+            <span class="module__head-actions">
+              <button type="button" class="btn btn--ghost btn--sm" id="incChildrenAll">Marcar todos</button>
+              <button type="button" class="btn btn--ghost btn--sm" id="incChildrenNone">Ninguno</button>
+            </span>
+          </div>
+          <div class="childrenlist" id="incChildren"></div>
+        </div>
         <p class="hint">Radicado, demandante y demandado son obligatorios. El sistema completa el resto con lo que encuentre.</p>
         <div class="module__head-actions">
           <button type="submit" class="btn btn--solid">Consultar y crear proceso</button>
@@ -210,6 +225,45 @@
         <label class="fieldlabel">Cliente destino <span class="req">obligatorio</span>
           <select class="field field--select" id="incBulkClient"><option value="">Selecciona un cliente…</option></select>
         </label>
+        <div class="inc-children" id="incBulkChildrenBlock" hidden>
+          <div class="section-head">
+            <span class="fieldlabel" style="margin:0">Clientes hijos <small class="hint">(opcional)</small></span>
+            <span class="module__head-actions">
+              <button type="button" class="btn btn--ghost btn--sm" id="incBulkChildrenAll">Marcar todos</button>
+              <button type="button" class="btn btn--ghost btn--sm" id="incBulkChildrenNone">Ninguno</button>
+            </span>
+          </div>
+          <div class="childrenlist" id="incBulkChildren"></div>
+        </div>
+        <label class="checktoggle">
+          <input type="checkbox" id="incBulkDocumentoToggle" />
+          Elegir datos del documento <small class="hint">(si no, se usa un documento por defecto para todo el lote)</small>
+        </label>
+        <div id="incBulkDocumentoFields" hidden>
+          <div class="formgrid">
+            <label class="fieldlabel">Tipo de documento
+              <select class="field field--select" id="incBulkTipoDocumento">
+                <option value="">Selecciona…</option>
+                <option value="DNI">DNI</option>
+                <option value="CE">Carné de Extranjería (CE)</option>
+              </select>
+            </label>
+            <label class="fieldlabel">Número de documento
+              <input class="field" id="incBulkNumeroDocumento" placeholder="Ej. 12345678" inputmode="numeric" autocomplete="off" />
+            </label>
+          </div>
+          <label class="fieldlabel" id="incBulkCodigoWrap" hidden>Código <span class="req">obligatorio</span>
+            <input class="field" id="incBulkCodigo" placeholder="Código" inputmode="numeric" autocomplete="off" />
+          </label>
+          <div class="formgrid">
+            <label class="fieldlabel">Fecha de emisión
+              <input class="field" type="date" id="incBulkFechaEmision" autocomplete="off" />
+            </label>
+            <label class="fieldlabel">Fecha de nacimiento
+              <input class="field" type="date" id="incBulkFechaNacimiento" autocomplete="off" />
+            </label>
+          </div>
+        </div>
         <div class="dropzone" id="incDropzone">
           <input type="file" id="incFileInput" accept=".xlsx,.xlsm" hidden />
           <div class="dropzone__inner">

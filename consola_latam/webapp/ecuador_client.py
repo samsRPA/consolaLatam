@@ -4,12 +4,15 @@ expone dos endpoints HTTP que consultan el portal por su cuenta (via RabbitMQ) y
 responden de forma sincrona con los radicados encontrados.
 
 Endpoints del bot (documentados por quien lo opera, no forman parte de este repo):
-  POST {BASE_URL}/api/v2/radicadosCJ/{caseNumber}/incluir?clienteId=..&usuario=..        -> un radicado
-  POST {BASE_URL}/api/v2/radicadosCJ/inclusiones?clienteId=..&usuario=.. (multipart file) -> lote via Excel
+  POST {BASE_URL}/api/v2/radicadosCJ/{caseNumber}/incluir  (JSON: {"clientes": [...]})     -> un radicado
+  POST {BASE_URL}/api/v2/radicadosCJ/inclusiones           (multipart: file + clientes)    -> lote via Excel
 
-clienteId/usuario identifican, ante el bot, al cliente (de la cartera de la firma) al que
-pertenece la inclusion; salen de los campos external_client_id/external_username del
-cliente seleccionado en la consola (ver app.py:_ecuador_bot_identity y db.py).
+`clientes` es un arreglo de {"clienteId": int, "nombreCliente": str} -- SIEMPRE incluye
+al cliente padre seleccionado en la consola (obligatorio) y, opcionalmente, los clientes
+hijos de facturacion (jerarquia Oracle) que el usuario haya marcado con checkbox. Los
+valores salen de external_client_id/external_username del cliente y de client_children
+(ver app.py:_build_clientes_payload y db.py); nombreCliente es siempre el nombre oficial
+que trae Oracle, no uno escrito a mano.
 
 Ambos responden 200 con:
   {"batchId": "...", "total": N, "radicados": [ {radicado, materia, fechaIngreso,
@@ -21,6 +24,7 @@ timeout o caida de conexion se reintenta UNA vez antes de rendirse."""
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -60,19 +64,16 @@ def _post_with_retry(url: str, *, timeout: float, **kwargs: Any) -> dict:
     )
 
 
-def incluir_individual(radicado: str, cliente_id: str, usuario: str, timeout: float = DEFAULT_TIMEOUT) -> dict:
+def incluir_individual(radicado: str, clientes: list[dict], timeout: float = DEFAULT_TIMEOUT) -> dict:
     url = f"{BASE_URL}/api/v2/radicadosCJ/{radicado}/incluir"
-    params = {"clienteId": cliente_id, "usuario": usuario}
-    return _post_with_retry(url, timeout=timeout, params=params)
+    return _post_with_retry(url, timeout=timeout, json={"clientes": clientes})
 
 
-def incluir_bulk(
-    file_bytes: bytes, filename: str, cliente_id: str, usuario: str, timeout: float = DEFAULT_TIMEOUT
-) -> dict:
+def incluir_bulk(file_bytes: bytes, filename: str, clientes: list[dict], timeout: float = DEFAULT_TIMEOUT) -> dict:
     url = f"{BASE_URL}/api/v2/radicadosCJ/inclusiones"
-    params = {"clienteId": cliente_id, "usuario": usuario}
     files = {"file": (filename, file_bytes)}
-    return _post_with_retry(url, timeout=timeout, params=params, files=files)
+    data = {"clientes": json.dumps(clientes, ensure_ascii=False)}
+    return _post_with_retry(url, timeout=timeout, files=files, data=data)
 
 
 def persist_radicado(radicado: dict, client_id: int | None) -> dict:

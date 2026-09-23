@@ -256,6 +256,19 @@ CREATE TABLE IF NOT EXISTS reminders (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(due_date);
+
+-- Clientes hijos (Oracle): jerarquia de facturacion (CLIENTE_PADRE) traida al crear el
+-- cliente a partir del Cliente ID de Oracle que el usuario ingresa como cliente padre
+-- (clients.oracle_cliente_padre_id). Se reemplaza completa cada vez que se recalcula
+-- (ver db.set_client_children), no se actualiza incrementalmente.
+CREATE TABLE IF NOT EXISTS client_children (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    oracle_cliente_id INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_client_children_client ON client_children(client_id);
 """
 
 # Columnas agregadas despues de la version inicial. SQLite no tiene "ADD COLUMN IF NOT
@@ -477,6 +490,33 @@ def delete_client(client_id: int) -> None:
     with _tx() as conn:
         conn.execute("DELETE FROM processes WHERE client_id = ?", (client_id,))
         conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+
+
+# ---------- clientes hijos (jerarquia de facturacion en Oracle) ----------
+
+def set_client_children(client_id: int, children: list[dict[str, Any]]) -> None:
+    """Reemplaza por completo los clientes hijos (Oracle) guardados para este cliente,
+    con lo ultimo que trajo la consulta CONNECT BY (ver oracle_client.fetch_client_hierarchy).
+    Cada item trae {"cliente_id": int, "nombre": str}.
+
+    El propio cliente padre nunca se guarda como "hijo" -- se descarta aqui (ademas del
+    filtro ya aplicado en oracle_client) como ultima barrera antes del insert, por si
+    quien llame a esta funcion algun dia pasa la jerarquia sin filtrar."""
+    padre_oracle_id = str(get_client(client_id).get("external_client_id") or "").strip()
+    now = _now()
+    with _tx() as conn:
+        conn.execute("DELETE FROM client_children WHERE client_id = ?", (client_id,))
+        conn.executemany(
+            "INSERT INTO client_children (client_id, oracle_cliente_id, nombre, created_at) VALUES (?, ?, ?, ?)",
+            [(client_id, c["cliente_id"], c["nombre"], now) for c in children if str(c["cliente_id"]) != padre_oracle_id],
+        )
+
+
+def list_client_children(client_id: int) -> list[dict[str, Any]]:
+    rows = _connect().execute(
+        "SELECT * FROM client_children WHERE client_id = ? ORDER BY oracle_cliente_id", (client_id,)
+    ).fetchall()
+    return [_row_to_dict(r) for r in rows]
 
 
 # ---------- bases ----------

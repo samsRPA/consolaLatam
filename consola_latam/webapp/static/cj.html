@@ -101,8 +101,7 @@
           </div>
         </div>
         <div class="formgrid">
-          <input class="field" id="clientExternalId" placeholder="Cliente ID (bot)" autocomplete="off" />
-          <input class="field" id="clientExternalUser" placeholder="Usuario (bot)" autocomplete="off" />
+          <input class="field" id="clientExternalId" placeholder="Cliente ID" autocomplete="off" inputmode="numeric" />
         </div>
         <textarea class="field" id="clientDesc" rows="2" placeholder="Descripción / notas"></textarea>
         <div class="segmented" id="clientImportance" data-value="MEDIA">
@@ -162,17 +161,37 @@
         <label class="fieldlabel">Radicado <span class="req">obligatorio</span>
           <input class="field" id="incRadicado" placeholder="17230-2020-08857" autocomplete="off" />
         </label>
-        <label class="fieldlabel">Cliente <span class="req">obligatorio</span>
+        <label class="fieldlabel">Cliente padre <span class="req">obligatorio</span>
           <select class="field field--select" id="incClient"><option value="">Selecciona un cliente…</option></select>
         </label>
+        <div class="inc-children" id="incChildrenBlock" hidden>
+          <div class="section-head">
+            <span class="fieldlabel" style="margin:0">Clientes hijos <small class="hint">(opcional)</small></span>
+            <span class="module__head-actions">
+              <button type="button" class="btn btn--ghost btn--sm" id="incChildrenAll">Marcar todos</button>
+              <button type="button" class="btn btn--ghost btn--sm" id="incChildrenNone">Ninguno</button>
+            </span>
+          </div>
+          <div class="childrenlist" id="incChildren"></div>
+        </div>
         <p class="hint">El sistema completa el resto con lo que encuentre.</p>
         <button type="submit" class="btn btn--solid">Consultar y crear proceso</button>
       </form>
 
       <form class="card inclusion-form" id="inclusionBulkForm" hidden>
-        <label class="fieldlabel">Cliente destino <span class="req">obligatorio</span>
+        <label class="fieldlabel">Cliente padre destino <span class="req">obligatorio</span>
           <select class="field field--select" id="incBulkClient"><option value="">Selecciona un cliente…</option></select>
         </label>
+        <div class="inc-children" id="incBulkChildrenBlock" hidden>
+          <div class="section-head">
+            <span class="fieldlabel" style="margin:0">Clientes hijos <small class="hint">(opcional)</small></span>
+            <span class="module__head-actions">
+              <button type="button" class="btn btn--ghost btn--sm" id="incBulkChildrenAll">Marcar todos</button>
+              <button type="button" class="btn btn--ghost btn--sm" id="incBulkChildrenNone">Ninguno</button>
+            </span>
+          </div>
+          <div class="childrenlist" id="incBulkChildren"></div>
+        </div>
         <div class="dropzone" id="incDropzone">
           <input type="file" id="incFileInput" accept=".xlsx,.xls" hidden />
           <div class="dropzone__inner">

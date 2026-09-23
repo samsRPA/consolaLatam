@@ -26,6 +26,7 @@ ese momento)."""
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import re
 import shutil
@@ -42,17 +43,19 @@ from ..detect import DetectionError, detect_columns
 from ..base_reader import read_base_auto
 from . import db
 from . import ecuador_client
+from . import oracle_client
 from .run_manager import MANAGER, RunBusyError
 from .scheduler import SCHEDULER
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Scraper CEJ Peru - Consola")
 api_router = APIRouter()
 
 
 @app.on_event("startup")
-def _startup() -> None:
+async def _startup() -> None:
     # Migra datos de la ubicacion antigua (Descargas, vulnerable a Storage Sense) a
     # AppData\Local la primera vez que se detecta, ANTES de inicializar el esquema.
     # Exclusiva de Peru (ver db.migrate_legacy_data_dir); CURRENT_SEDE arranca en "peru".
@@ -65,6 +68,18 @@ def _startup() -> None:
         db.backup_database()
     db.set_sede(db.DEFAULT_SEDE)
     SCHEDULER.start()
+    # Mejor esfuerzo: si Oracle (o el tunel SSH que lo expone) no esta disponible al
+    # arrancar, no se cae toda la consola -- api_create_client reintenta la conexion
+    # cuando de verdad se necesita (ver oracle_client.ensure_connected).
+    try:
+        await oracle_client.ensure_connected()
+    except Exception as exc:
+        logger.warning(f"No se pudo conectar a Oracle al arrancar: {exc}")
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    await oracle_client.close()
 
 
 @app.middleware("http")
@@ -106,18 +121,43 @@ def api_list_clients() -> list[dict]:
     return db.list_clients()
 
 
+async def _resolve_oracle_hierarchy(cliente_id_raw: str) -> tuple[str, list[dict]]:
+    """Valida y consulta Oracle para `cliente_id_raw` (external_client_id tal como viene
+    del form o ya guardado en el cliente), traduciendo los errores de oracle_client a
+    HTTPException."""
+    try:
+        oracle_id = int(cliente_id_raw)
+    except ValueError:
+        raise HTTPException(400, "El Cliente ID debe ser numerico")
+    try:
+        return await oracle_client.fetch_client_hierarchy(oracle_id)
+    except oracle_client.ClienteIdNoExisteError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except oracle_client.OracleUnavailableError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
 @api_router.post("/clients")
-def api_create_client(
+async def api_create_client(
     name: str = Form(...), description: str = Form(""), importance: str = Form("MEDIA"),
-    client_type: str = Form(""), external_client_id: str = Form(...), external_username: str = Form(...),
+    client_type: str = Form(""), external_client_id: str = Form(...),
 ) -> dict:
+    """Crea el cliente a partir de su Cliente ID de Oracle (CLIENTE_ID en CLIENTES): el
+    mismo id que identifica al cliente ante el bot externo (Peru/Ecuador). Se valida
+    contra Oracle -- si no existe se bloquea la creacion -- y el nombre oficial que
+    devuelve Oracle (f_nombre_cliente) se guarda como external_username en vez de
+    pedirselo al usuario. De paso se traen y guardan todos sus clientes hijos de
+    facturacion (jerarquia CLIENTE_PADRE, ver oracle_client.fetch_client_hierarchy)."""
     if not name.strip():
         raise HTTPException(400, "El nombre del cliente es obligatorio")
-    if not external_client_id.strip():
+    external_client_id = external_client_id.strip()
+    if not external_client_id:
         raise HTTPException(400, "El Cliente ID es obligatorio")
-    if not external_username.strip():
-        raise HTTPException(400, "El Usuario es obligatorio")
-    return db.create_client(name, description, importance, client_type, external_client_id, external_username)
+    nombre_oracle, hijos = await _resolve_oracle_hierarchy(external_client_id)
+    client = db.create_client(name, description, importance, client_type, external_client_id, nombre_oracle)
+    db.set_client_children(client["id"], hijos)
+    client["children"] = db.list_client_children(client["id"])
+    return client
 
 
 @api_router.delete("/clients/{client_id}")
@@ -129,6 +169,28 @@ def api_delete_client(client_id: int) -> dict:
 @api_router.get("/clients/{client_id}/history")
 def api_client_history(client_id: int) -> list[dict]:
     return db.list_query_history(client_id)
+
+
+@api_router.get("/clients/{client_id}/children")
+def api_client_children(client_id: int) -> list[dict]:
+    return db.list_client_children(client_id)
+
+
+@api_router.post("/clients/{client_id}/children/refresh")
+async def api_refresh_client_children(client_id: int) -> list[dict]:
+    """Vuelve a consultar Oracle con el Cliente ID ya guardado del cliente y reemplaza sus
+    clientes hijos locales -- para traer los que se hayan creado en Oracle despues de la
+    primera consulta (ver oracle_client.fetch_client_hierarchy)."""
+    try:
+        client = db.get_client(client_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    external_client_id = str(client.get("external_client_id") or "").strip()
+    if not external_client_id:
+        raise HTTPException(400, "El cliente no tiene Cliente ID de Oracle configurado")
+    _, hijos = await _resolve_oracle_hierarchy(external_client_id)
+    db.set_client_children(client_id, hijos)
+    return db.list_client_children(client_id)
 
 
 # ---------- carpetas ----------
@@ -213,12 +275,28 @@ def api_delete_base(base_id: int) -> dict:
 # ---------- corridas ----------
 
 @api_router.post("/bases/{base_id}/run")
-def api_start_run(base_id: int, mode: str = Form("total")) -> dict:
+def api_start_run(
+    base_id: int, mode: str = Form("total"), hijo_ids: str = Form(""),
+    tipo_documento: str = Form(""), numero_documento: str = Form(""), codigo: str = Form(""),
+    fecha_emision: str = Form(""), fecha_nacimiento: str = Form(""),
+) -> dict:
     mode = mode.lower()
     if mode not in {"total", "daily"}:
         raise HTTPException(400, "mode debe ser total o daily")
     try:
-        run = MANAGER.start_run(base_id, mode, db.CURRENT_SEDE.get())
+        base = db.get_base(base_id)
+    except KeyError:
+        raise HTTPException(404, "Base no existe")
+    # La base ya tiene un cliente fijo (obligatorio al crearla); si es Peru se arma el
+    # mismo arreglo `clientes` que exige el bot para este lote, y el documento por
+    # defecto/elegido que se aplica a todo el lote (ver peru_client.py).
+    clientes = None
+    documento = None
+    if db.CURRENT_SEDE.get() == "peru":
+        clientes = _build_clientes_payload(base["client_id"], _parse_hijo_ids(hijo_ids))
+        documento = _build_documento(tipo_documento, numero_documento, codigo, fecha_emision, fecha_nacimiento)
+    try:
+        run = MANAGER.start_run(base_id, mode, db.CURRENT_SEDE.get(), clientes, documento)
     except RunBusyError as exc:
         raise HTTPException(409, str(exc))
     except KeyError:
@@ -508,18 +586,31 @@ def _parse_iso_date(value: str, field_label: str) -> date:
         raise HTTPException(400, f"{field_label} inválida: usa el formato AAAA-MM-DD")
 
 
+# Documento por defecto: se manda tal cual cuando el usuario deja los 5 campos vacios
+# (el documento es opcional, tanto en Inclusiones individual como en el Excel masivo).
+DEFAULT_DOCUMENTO: dict = {
+    "numeroDocumento": "00256282",
+    "codigo": 6,
+    "fechaEmision": date(2026, 2, 9).isoformat(),
+    "fechaNacimiento": date(1976, 10, 2).isoformat(),
+    "tipoDocumento": "DNI",
+}
+
+
 def _build_documento(
     tipo_documento: str, numero_documento: str, codigo: str, fecha_emision: str, fecha_nacimiento: str,
 ) -> dict:
-    """Valida y arma el bloque de identidad (documento) que se envia al bot: tipo/numero de
-    documento, codigo (solo DNI) y fechas de emision/nacimiento son obligatorios en el
-    formulario de Inclusiones individual. Replica las reglas del modelo del bot
-    (tipoDocumento/numeroDocumento/codigo) mas las validaciones de fecha que pide el negocio."""
+    """Valida y arma el bloque de identidad (documento) que se envia al bot. Es OPCIONAL:
+    si el usuario no llena ninguno de los 5 campos se manda DEFAULT_DOCUMENTO tal cual; en
+    cuanto llena alguno, se exige el resto y se validan formato/fechas como antes."""
     tipo_documento = (tipo_documento or "").strip().upper()
     numero_documento = (numero_documento or "").strip()
     codigo = (codigo or "").strip()
     fecha_emision = (fecha_emision or "").strip()
     fecha_nacimiento = (fecha_nacimiento or "").strip()
+
+    if not any((tipo_documento, numero_documento, codigo, fecha_emision, fecha_nacimiento)):
+        return dict(DEFAULT_DOCUMENTO)
 
     if not tipo_documento:
         raise HTTPException(400, "El tipo de documento es obligatorio")
@@ -570,9 +661,9 @@ def _build_documento(
 @api_router.post("/inclusiones")
 def api_inclusion(
     radicado: str = Form(...), demandante: str = Form(""), demandado: str = Form(""),
-    client_id: int | None = Form(None), valor_parte: str = Form(""),
+    client_id: int = Form(...), valor_parte: str = Form(""),
     tipo_documento: str = Form(""), numero_documento: str = Form(""), codigo: str = Form(""),
-    fecha_emision: str = Form(""), fecha_nacimiento: str = Form(""),
+    fecha_emision: str = Form(""), fecha_nacimiento: str = Form(""), hijo_ids: str = Form(""),
 ) -> dict:
     if not radicado.strip():
         raise HTTPException(400, "El radicado es obligatorio")
@@ -581,10 +672,13 @@ def api_inclusion(
     if not demandado.strip():
         raise HTTPException(400, "El demandado es obligatorio")
     documento = _build_documento(tipo_documento, numero_documento, codigo, fecha_emision, fecha_nacimiento)
+    # El cliente padre es obligatorio (igual que en Ecuador); los hijos marcados con
+    # checkbox son opcionales -- ver peru_client.py y _build_clientes_payload.
+    clientes = _build_clientes_payload(client_id, _parse_hijo_ids(hijo_ids))
     try:
         return MANAGER.start_inclusion(
             radicado.strip(), demandante.strip(), demandado.strip(), client_id, db.CURRENT_SEDE.get(),
-            valor_parte.strip(), documento,
+            valor_parte.strip(), documento, clientes,
         )
     except RunBusyError as exc:
         raise HTTPException(409, str(exc))
@@ -605,33 +699,50 @@ def _require_ecuador() -> None:
 INCLUSION_CASE_NUMBER_PATTERN = re.compile(r"^\d{5}-\d{4}-\d{5}$")
 
 
-def _ecuador_bot_identity(client_id: int) -> tuple[str, str]:
-    """Resuelve el clienteId/usuario que el bot de Ecuador exige en /incluir a partir del
-    cliente interno seleccionado (ver ecuador_client.py)."""
+def _parse_hijo_ids(raw: str) -> list[int]:
+    ids = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part:
+            ids.append(int(part))
+    return ids
+
+
+def _build_clientes_payload(client_id: int, hijo_ids: list[int]) -> list[dict]:
+    """Arma el arreglo `clientes` que exige el bot de Ecuador: el cliente padre
+    seleccionado (siempre obligatorio) mas los clientes hijos que el usuario haya
+    marcado con checkbox (opcionales) -- ver ecuador_client.py."""
     try:
         client = db.get_client(client_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
-    cliente_id = str(client.get("external_client_id") or "").strip()
-    usuario = str(client.get("external_username") or "").strip()
-    if not cliente_id or not usuario:
+    external_client_id = str(client.get("external_client_id") or "").strip()
+    external_username = str(client.get("external_username") or "").strip()
+    if not external_client_id or not external_username:
         raise HTTPException(
-            400, "El cliente seleccionado no tiene Cliente ID/Usuario configurados; edítalo antes de incluir"
+            400, "El cliente seleccionado no tiene Cliente ID de Oracle configurado; edítalo antes de incluir"
         )
-    return cliente_id, usuario
+    padre_id = int(external_client_id)
+    clientes = [{"clienteId": padre_id, "nombreCliente": external_username}]
+    if hijo_ids:
+        seleccionados = set(hijo_ids)
+        for hijo in db.list_client_children(client_id):
+            if hijo["oracle_cliente_id"] != padre_id and hijo["oracle_cliente_id"] in seleccionados:
+                clientes.append({"clienteId": hijo["oracle_cliente_id"], "nombreCliente": hijo["nombre"]})
+    return clientes
 
 
 @api_router.post("/inclusiones/bot")
-def api_inclusion_ecuador(radicado: str = Form(...), client_id: int = Form(...)) -> dict:
+def api_inclusion_ecuador(radicado: str = Form(...), client_id: int = Form(...), hijo_ids: str = Form("")) -> dict:
     _require_ecuador()
     radicado = radicado.strip()
     if not radicado:
         raise HTTPException(400, "El radicado es obligatorio")
     if not INCLUSION_CASE_NUMBER_PATTERN.match(radicado):
         raise HTTPException(400, "El radicado debe tener el formato NNNNN-NNNN-NNNNN (ej. 17230-2020-08857)")
-    cliente_id, usuario = _ecuador_bot_identity(client_id)
+    clientes = _build_clientes_payload(client_id, _parse_hijo_ids(hijo_ids))
     try:
-        data = ecuador_client.incluir_individual(radicado, cliente_id, usuario)
+        data = ecuador_client.incluir_individual(radicado, clientes)
     except ecuador_client.EcuadorBotError as exc:
         raise HTTPException(502, str(exc))
     procesados = [ecuador_client.persist_radicado(r, client_id) for r in data.get("radicados", [])]
@@ -639,18 +750,85 @@ def api_inclusion_ecuador(radicado: str = Form(...), client_id: int = Form(...))
 
 
 @api_router.post("/inclusiones/bot/bulk")
-async def api_inclusion_ecuador_bulk(file: UploadFile = File(...), client_id: int = Form(...)) -> dict:
+async def api_inclusion_ecuador_bulk(
+    file: UploadFile = File(...), client_id: int = Form(...), hijo_ids: str = Form("")
+) -> dict:
     _require_ecuador()
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Sube un archivo Excel (.xlsx/.xls)")
-    cliente_id, usuario = _ecuador_bot_identity(client_id)
+    clientes = _build_clientes_payload(client_id, _parse_hijo_ids(hijo_ids))
     content = await file.read()
     try:
-        data = ecuador_client.incluir_bulk(content, file.filename, cliente_id, usuario)
+        data = ecuador_client.incluir_bulk(content, file.filename, clientes)
     except ecuador_client.EcuadorBotError as exc:
         raise HTTPException(502, str(exc))
     procesados = [ecuador_client.persist_radicado(r, client_id) for r in data.get("radicados", [])]
     return {"batchId": data.get("batchId"), "total": len(procesados), "process_ids": [p["id"] for p in procesados]}
+
+
+# ---------- Clientes de un proceso en Oracle (PROCESOS_CLIENTES) ----------
+# Permite asociar mas clientes a un proceso ya incluido via el bot (Peru o Ecuador),
+# identificado por su Proceso ID de Oracle (detail.procesoId, guardado al incluirlo -- ver
+# ecuador_client.persist_radicado y peru_client.persist_case). El Cliente ID se puede
+# elegir del panel de clientes de la consola (con sus hijos ya guardados) o escribirse a
+# mano; en ambos casos se valida en vivo contra Oracle (ver
+# oracle_client.fetch_client_hierarchy) y nunca se inserta un cliente que ya estuviera
+# asociado a ese proceso (oracle_client.agregar_clientes_a_proceso). Sede-agnostico: Oracle
+# no distingue de que sede vino el proceso, solo necesita su Proceso ID.
+
+def _process_oracle_id(process_id: int) -> int:
+    try:
+        proc = db.get_process(process_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    proceso_id = (proc.get("detail") or {}).get("procesoId")
+    if not proceso_id:
+        raise HTTPException(400, "Este proceso no tiene Proceso ID de Oracle (no fue incluido via el bot)")
+    return int(proceso_id)
+
+
+@api_router.get("/oracle-clientes/{cliente_id}/lookup")
+async def api_oracle_cliente_lookup(cliente_id: int) -> dict:
+    """Valida un Cliente ID de Oracle (del panel o escrito a mano) y devuelve su nombre
+    oficial + sus clientes hijos, para el mismo panel de seleccion que usa Inclusiones."""
+    try:
+        nombre, hijos = await oracle_client.fetch_client_hierarchy(cliente_id)
+    except oracle_client.ClienteIdNoExisteError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except oracle_client.OracleUnavailableError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {"cliente_id": cliente_id, "nombre": nombre, "hijos": hijos}
+
+
+@api_router.get("/processes/{process_id}/oracle-clientes")
+async def api_list_process_oracle_clientes(process_id: int) -> list[dict]:
+    proceso_id = _process_oracle_id(process_id)
+    try:
+        return await oracle_client.list_proceso_clientes(proceso_id)
+    except oracle_client.OracleUnavailableError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@api_router.post("/processes/{process_id}/oracle-clientes")
+async def api_add_process_oracle_clientes(process_id: int, clientes: str = Form(...)) -> dict:
+    """clientes: JSON [{"cliente_id": int, "nombre": str}, ...] -- el cliente elegido (padre
+    o escrito a mano) mas los hijos que el usuario haya marcado. Devuelve cuales se
+    agregaron y cuales ya estaban asociados (se omiten, nunca se duplican)."""
+    proceso_id = _process_oracle_id(process_id)
+    try:
+        items = json.loads(clientes)
+    except ValueError:
+        raise HTTPException(400, "clientes debe ser un JSON valido")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(400, "Selecciona al menos un cliente")
+    try:
+        parsed = [{"cliente_id": int(c["cliente_id"]), "nombre": str(c.get("nombre") or "")} for c in items]
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(400, "Formato invalido en clientes")
+    try:
+        return await oracle_client.agregar_clientes_a_proceso(proceso_id, parsed)
+    except oracle_client.OracleUnavailableError as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 # ---------- Notificaciones ----------

@@ -114,18 +114,16 @@ def write_ecuador_processes_workbook(processes: list[dict], output_path: Path) -
 # ============================================================================
 
 PERU_BOT_HEADERS = [
-    "RADICADO", "CLIENTE", "DESPACHO", "ESPECIALISTA LEGAL", "FECHA INICIO", "MATERIA",
+    "PROCESO ID", "RADICADO", "CLIENTE", "DESPACHO", "ESPECIALISTA LEGAL", "FECHA INICIO", "MATERIA",
     "ETAPA PROCESAL", "UBICACION", "ESPECIALIDAD", "ESTADO", "DISTRITO JUDICIAL",
     "DEMANDANTES", "DEMANDADOS", "VALOR PARTE",
-    "TIPO DOCUMENTO", "NRO DOCUMENTO", "CODIGO", "FECHA EMISION", "FECHA NACIMIENTO",
     "ERROR",
 ]
 PERU_BOT_REPORT_KEYS = [
     "ESPECIALISTA LEGAL", "FECHA INICIO", "MATERIA", "ETAPA PROCESAL",
     "UBICACION", "ESPECIALIDAD", "ESTADO", "DISTRITO JUDICIAL",
 ]
-PERU_BOT_DOCUMENTO_KEYS = ["tipoDocumento", "numeroDocumento", "codigo", "fechaEmision", "fechaNacimiento"]
-PERU_BOT_COL_WIDTHS = [18, 22, 26, 26, 14, 26, 14, 20, 16, 22, 18, 34, 34, 22, 16, 18, 12, 16, 18, 34]
+PERU_BOT_COL_WIDTHS = [14, 18, 22, 26, 26, 14, 26, 14, 20, 16, 22, 18, 34, 34, 22, 34]
 
 
 def _grouped_actor_names(detail: dict, tipo: str, fallback: str) -> str:
@@ -153,13 +151,13 @@ def write_peru_bot_processes_workbook(processes: list[dict], output_path: Path) 
         detail = proc.get("detail") or {}
         reporte = detail.get("reporte") or {}
         _append_row(ws, [
+            detail.get("procesoId", ""),
             proc.get("radicado", ""), proc.get("client_name", ""),
             detail.get("despacho") or proc.get("organo", ""),
             *[reporte.get(key, "") for key in PERU_BOT_REPORT_KEYS],
             _grouped_actor_names(detail, "DEMANDANTE", proc.get("demandante", "")),
             _grouped_actor_names(detail, "DEMANDADO", proc.get("demandado", "")),
             detail.get("valorParte", ""),
-            *[detail.get(key, "") for key in PERU_BOT_DOCUMENTO_KEYS],
             detail.get("error", ""),
         ])
     for idx, width in enumerate(PERU_BOT_COL_WIDTHS, start=1):

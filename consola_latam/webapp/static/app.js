@@ -200,7 +200,7 @@ function showModule(name) {
   if (name === "clientes") loadClients();
   if (name === "procesos") loadProcesses();
   if (name === "notificaciones") loadNotifications();
-  if (name === "inclusiones") fillClientSelect("#incClient");
+  if (name === "inclusiones") fillClientSelectForInclusion("#incClient");
   if (name === "gestion") loadGestion();
 }
 
@@ -546,7 +546,7 @@ async function loadClients() {
   state.clients = await api("/api/peru/clients");
   renderClients();
   fillClientSelect("#procClientFilter", true);
-  fillClientSelect("#incClient");
+  fillClientSelectForInclusion("#incClient");
 }
 function renderClients() {
   const list = $("#clientList");
@@ -574,24 +574,72 @@ function fillClientSelect(sel, withAll) {
   node.value = current;
 }
 
+/* Selects de cliente en Inclusiones: a diferencia de fillClientSelect, muestran el
+   Cliente ID de Oracle (para identificar cual es cual entre clientes con nombres
+   parecidos) y, al elegir uno, muestran sus clientes hijos (jerarquia Oracle) debajo
+   como checkboxes -- el cliente padre elegido en el select siempre va en la peticion al
+   bot (opcional en Peru) y los hijos marcados se agregan al mismo arreglo `clientes`. */
+const INC_CHILDREN_MAP = {
+  "#incClient": { block: "#incChildrenBlock", list: "#incChildren" },
+  "#incBulkClient": { block: "#incBulkChildrenBlock", list: "#incBulkChildren" },
+};
+function fillClientSelectForInclusion(sel) {
+  const node = $(sel);
+  if (!node) return;
+  const current = node.value;
+  node.innerHTML = `<option value="">Selecciona un cliente…</option>`
+    + state.clients.map((c) => `<option value="${c.id}">${esc(c.name)} · ID ${esc(c.external_client_id || "—")}</option>`).join("");
+  node.value = current;
+  loadIncChildren(sel);
+}
+async function loadIncChildren(sel) {
+  const { block: blockSel, list: listSel } = INC_CHILDREN_MAP[sel];
+  const clientId = $(sel).value;
+  const block = $(blockSel), list = $(listSel);
+  if (!clientId) { block.hidden = true; list.innerHTML = ""; return; }
+  let children = [];
+  try { children = await api(`/api/peru/clients/${clientId}/children`); } catch (err) { return showErrorPopup(err.message); }
+  if (!children.length) { block.hidden = true; list.innerHTML = ""; return; }
+  block.hidden = false;
+  list.innerHTML = children.map((c) => `
+    <label class="childrow childrow--check">
+      <span class="childrow__check">
+        <input type="checkbox" value="${c.oracle_cliente_id}" />
+        <span class="childrow__name">${esc(c.nombre)}</span>
+      </span>
+      <span class="childrow__id">ID: ${esc(c.oracle_cliente_id)}</span>
+    </label>`).join("");
+}
+function selectedIncChildren(listSel) {
+  return $$(`${listSel} input[type="checkbox"]:checked`).map((cb) => cb.value).join(",");
+}
+function setIncChildrenChecked(listSel, checked) {
+  $$(`${listSel} input[type="checkbox"]`).forEach((cb) => (cb.checked = checked));
+}
+$("#incClient").addEventListener("change", () => loadIncChildren("#incClient"));
+$("#incBulkClient").addEventListener("change", () => loadIncChildren("#incBulkClient"));
+$("#incChildrenAll").addEventListener("click", () => setIncChildrenChecked("#incChildren", true));
+$("#incChildrenNone").addEventListener("click", () => setIncChildrenChecked("#incChildren", false));
+$("#incBulkChildrenAll").addEventListener("click", () => setIncChildrenChecked("#incBulkChildren", true));
+$("#incBulkChildrenNone").addEventListener("click", () => setIncChildrenChecked("#incBulkChildren", false));
+
 $("#newClientBtn").addEventListener("click", () => { $("#clientForm").hidden = !$("#clientForm").hidden; });
 $("#clientCancel").addEventListener("click", () => ($("#clientForm").hidden = true));
 $("#clientForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#clientName").value.trim();
   const externalClientId = $("#clientExternalId").value.trim();
-  const externalUsername = $("#clientExternalUser").value.trim();
   if (!name) return toast("El nombre es obligatorio");
-  if (!externalClientId || !externalUsername) return toast("Cliente ID y Usuario son obligatorios");
+  if (!externalClientId) return toast("El Cliente ID es obligatorio");
   try {
     await api("/api/peru/clients", { method: "POST", body: form({
       name, description: $("#clientDesc").value,
       importance: $("#clientImportance").dataset.value,
       client_type: $("#clientType").dataset.value,
-      external_client_id: externalClientId, external_username: externalUsername,
+      external_client_id: externalClientId,
     }) });
     $("#clientName").value = ""; $("#clientDesc").value = "";
-    $("#clientExternalId").value = ""; $("#clientExternalUser").value = "";
+    $("#clientExternalId").value = "";
     $("#clientForm").hidden = true;
     await loadClients();
     toast("Cliente creado", true);
@@ -617,7 +665,7 @@ async function renderClientWorkspace() {
         ${c.client_type ? `<span class="chip chip--type">${esc(c.client_type)}</span>` : ""}
         <h2 class="client-header__name">${esc(c.name)}</h2>
         <p class="client-header__desc">${esc(c.description || "")}</p>
-        <p class="client-header__desc">Cliente ID: ${esc(c.external_client_id || "—")} · Usuario: ${esc(c.external_username || "—")}</p>
+        <p class="client-header__desc">Cliente ID: ${esc(c.external_client_id || "—")} · Nombre Oracle: ${esc(c.external_username || "—")}</p>
       </div>
       <div class="module__head-actions">
         <a class="btn btn--gold btn--sm" href="/api/peru/clients/${c.id}/report.pdf">Informe PDF</a>
@@ -636,11 +684,18 @@ async function renderClientWorkspace() {
     </div>
     <h3 class="ledger ledger--section">Bases del cliente</h3>
     <div class="baselist" id="baseList"></div>
+    <div class="section-head">
+      <h3 class="ledger ledger--section" id="childrenHeading">Clientes hijos (Oracle)</h3>
+      <button type="button" class="btn btn--ghost btn--sm" id="refreshChildrenBtn">↻ Actualizar</button>
+    </div>
+    <div class="childrenlist" id="childrenList"></div>
     <h3 class="ledger ledger--section">Historial de consultas</h3>
     <div class="historylist" id="historyList"></div>`;
   wireDropzone();
   $("#deleteClientBtn").addEventListener("click", deleteActiveClient);
+  $("#refreshChildrenBtn").addEventListener("click", refreshClientChildren);
   await loadBases();
+  await loadClientChildren();
   await loadHistory();
 }
 
@@ -667,6 +722,35 @@ async function loadHistory() {
       <span class="historyrow__counts">${h.total} proc · <b>${h.con_mov}</b> con mov · ${h.sin_mov} sin · ${h.errores} err</span>
       <span class="historyrow__date">${esc((h.created_at || "").replace("T", " "))}</span>
     </div>`).join("");
+}
+
+function renderClientChildren(list) {
+  const wrap = $("#childrenList");
+  $("#childrenHeading").textContent = `Clientes hijos (Oracle)${list.length ? " · " + list.length : ""}`;
+  if (!list.length) { wrap.innerHTML = `<p class="muted">Sin clientes hijos con facturación activa en Oracle.</p>`; return; }
+  wrap.innerHTML = list.map((h) => `
+    <div class="childrow">
+      <span class="childrow__name" title="${esc(h.nombre)}">${esc(h.nombre)}</span>
+      <span class="childrow__id">ID: ${esc(h.oracle_cliente_id)}</span>
+    </div>`).join("");
+}
+async function loadClientChildren() {
+  renderClientChildren(await api(`/api/peru/clients/${state.activeClient.id}/children`));
+}
+async function refreshClientChildren() {
+  const btn = $("#refreshChildrenBtn");
+  btn.disabled = true;
+  btn.textContent = "Consultando…";
+  try {
+    const list = await api(`/api/peru/clients/${state.activeClient.id}/children/refresh`, { method: "POST" });
+    renderClientChildren(list);
+    toast("Clientes hijos actualizados", true);
+  } catch (err) {
+    showErrorPopup(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "↻ Actualizar";
+  }
 }
 
 /* ---------- bases (dentro de cliente) ---------- */
@@ -794,19 +878,33 @@ function renderProcessDetail(p) {
   const despacho = d.despacho || p.organo || "";
   const valorParte = d.valorParte || "";
   const reporteRows = Object.entries(reporte).filter(([, v]) => v);
-  const DOCUMENTO_LABELS = {
-    tipoDocumento: "Tipo de documento", numeroDocumento: "Número de documento",
-    codigo: "Código", fechaEmision: "Fecha de emisión", fechaNacimiento: "Fecha de nacimiento",
-  };
-  const documentoRows = Object.entries(DOCUMENTO_LABELS)
-    .map(([key, label]) => [label, d[key]])
-    .filter(([, v]) => v || v === 0);
+  const procesoId = d.procesoId;
+  const botError = d.error || "";
+  const botErrorBanner = botError ? `<div class="alert-manual alert-manual--big">⚠ ${esc(botError)}</div>` : "";
+  // El proceso solo tiene Proceso ID de Oracle si se creo via inclusion al bot (ver
+  // peru_client.persist_case); sin eso PROCESOS_CLIENTES no tiene a que engancharse --
+  // misma logica que Ecuador (ver app-ecuador.js::renderProcessDetail).
+  const oracleClientesHtml = procesoId ? `
+    <h3 class="ledger ledger--section">Clientes asociados (Oracle)</h3>
+    <div class="childrenlist" id="procOracleClientes"><p class="muted">Cargando…</p></div>
+    <div class="card inclusion-form" id="procAddClienteCard" style="margin-top:14px">
+      <label class="fieldlabel" style="margin:0 0 8px">Agregar cliente al proceso</label>
+      <div class="formgrid">
+        <select class="field field--select" id="procClientPicker"><option value="">Elegir de mis clientes…</option></select>
+        <div style="display:flex; gap:8px;">
+          <input class="field" id="procClienteIdInput" placeholder="o escribe un Cliente ID de Oracle" inputmode="numeric" autocomplete="off" />
+          <button type="button" class="btn btn--ghost" id="procClienteBuscar">Buscar</button>
+        </div>
+      </div>
+      <div id="procClienteResult"></div>
+    </div>` : "";
   detail.innerHTML = `
     <button class="btn btn--ghost btn--sm" id="procBack">← Volver a la lista</button>
     <div class="procdetail__head">
       <div>
         <h2 class="procdetail__radicado">${esc(p.radicado)}</h2>
         <div class="procdetail__meta">
+          ${procesoId ? `<span><b>Proceso ID:</b> ${esc(procesoId)}</span>` : ""}
           <span><b>Demandantes:</b> ${actorListHtml(actorNames(d, "DEMANDANTE", p.demandante))}</span>
           <span><b>Demandados:</b> ${actorListHtml(actorNames(d, "DEMANDADO", p.demandado))}</span>
           ${despacho ? `<span><b>Despacho:</b> ${esc(despacho)}</span>` : ""}
@@ -819,19 +917,14 @@ function renderProcessDetail(p) {
         <button class="btn btn--danger-ghost" id="procDelete">Eliminar</button>
       </div>
     </div>
+    ${botErrorBanner}
     <h3 class="ledger ledger--section">Datos del proceso</h3>
     <div class="acttable-wrap">
       ${reporteRows.length ? `<table class="acttable">
         <tbody>${reporteRows.map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(v)}</td></tr>`).join("")}</tbody>
       </table>` : `<p class="muted">Sin datos adicionales del proceso.</p>`}
     </div>
-    ${documentoRows.length ? `
-      <h3 class="ledger ledger--section">Documento consultado</h3>
-      <div class="acttable-wrap">
-        <table class="acttable">
-          <tbody>${documentoRows.map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(v)}</td></tr>`).join("")}</tbody>
-        </table>
-      </div>` : ""}`;
+    ${oracleClientesHtml}`;
   $("#procBack").addEventListener("click", loadProcesses);
   $("#procDelete").addEventListener("click", () => {
     showConfirmPopup(`¿Eliminar el proceso ${p.radicado}? Esta acción no se puede deshacer.`, async () => {
@@ -842,6 +935,99 @@ function renderProcessDetail(p) {
       } catch (err) { showErrorPopup(err.message); }
     });
   });
+  initProcOracleClientes(p);
+}
+
+/* ---------- clientes de un proceso en Oracle (PROCESOS_CLIENTES) ---------- */
+let procOracleLookup = null;
+function initProcOracleClientes(p) {
+  const procesoId = p.detail && p.detail.procesoId;
+  if (!procesoId) return; // sin Proceso ID de Oracle no hay a que asociar clientes
+  procOracleLookup = null;
+  loadProcOracleClientes(p.id);
+  const picker = $("#procClientPicker");
+  picker.innerHTML = `<option value="">Elegir de mis clientes…</option>`
+    + state.clients.map((c) => `<option value="${esc(c.external_client_id || "")}">${esc(c.name)} · ID ${esc(c.external_client_id || "—")}</option>`).join("");
+  picker.addEventListener("change", () => {
+    if (picker.value) { $("#procClienteIdInput").value = picker.value; buscarOracleCliente(p.id); }
+  });
+  $("#procClienteBuscar").addEventListener("click", () => buscarOracleCliente(p.id));
+}
+async function loadProcOracleClientes(processId) {
+  const wrap = $("#procOracleClientes");
+  let list;
+  try { list = await api(`/api/peru/processes/${processId}/oracle-clientes`); }
+  catch (err) { wrap.innerHTML = `<p class="muted">No se pudo cargar (${esc(err.message)}).</p>`; return; }
+  if (!list.length) { wrap.innerHTML = `<p class="muted">Sin clientes asociados todavía en Oracle.</p>`; return; }
+  wrap.innerHTML = list.map((c) => `
+    <div class="childrow">
+      <span class="childrow__name">${esc(c.nombre)}</span>
+      <span class="childrow__id">ID: ${esc(c.cliente_id)}</span>
+    </div>`).join("");
+}
+async function buscarOracleCliente(processId) {
+  const input = $("#procClienteIdInput");
+  const clienteId = input.value.trim();
+  const result = $("#procClienteResult");
+  if (!clienteId || !/^\d+$/.test(clienteId)) return toast("Escribe un Cliente ID numérico");
+  result.innerHTML = `<p class="muted">Consultando Oracle…</p>`;
+  try {
+    procOracleLookup = await api(`/api/peru/oracle-clientes/${clienteId}/lookup`);
+  } catch (err) {
+    procOracleLookup = null;
+    result.innerHTML = `<p class="hint" style="color:var(--danger)">${esc(err.message)}</p>`;
+    return;
+  }
+  const hijosHtml = procOracleLookup.hijos.length ? `
+    <div class="section-head">
+      <span class="fieldlabel" style="margin:0">Clientes hijos <small class="hint">(opcional)</small></span>
+      <span class="module__head-actions">
+        <button type="button" class="btn btn--ghost btn--sm" id="procResultChildrenAll">Marcar todos</button>
+        <button type="button" class="btn btn--ghost btn--sm" id="procResultChildrenNone">Ninguno</button>
+      </span>
+    </div>
+    <div class="childrenlist" id="procResultChildren">
+      ${procOracleLookup.hijos.map((h) => `
+        <label class="childrow childrow--check">
+          <span class="childrow__check">
+            <input type="checkbox" value="${h.cliente_id}" />
+            <span class="childrow__name">${esc(h.nombre)}</span>
+          </span>
+          <span class="childrow__id">ID: ${esc(h.cliente_id)}</span>
+        </label>`).join("")}
+    </div>` : "";
+  result.innerHTML = `
+    <p class="hint">Encontrado: <b>${esc(procOracleLookup.nombre)}</b> (ID ${esc(procOracleLookup.cliente_id)})</p>
+    ${hijosHtml}
+    <button type="button" class="btn btn--solid btn--sm" id="procClienteAgregarBtn">Agregar cliente(s) al proceso</button>`;
+  if (procOracleLookup.hijos.length) {
+    $("#procResultChildrenAll").addEventListener("click", () => setIncChildrenChecked("#procResultChildren", true));
+    $("#procResultChildrenNone").addEventListener("click", () => setIncChildrenChecked("#procResultChildren", false));
+  }
+  $("#procClienteAgregarBtn").addEventListener("click", () => agregarOracleClientesAlProceso(processId));
+}
+async function agregarOracleClientesAlProceso(processId) {
+  if (!procOracleLookup) return;
+  const clientes = [{ cliente_id: procOracleLookup.cliente_id, nombre: procOracleLookup.nombre }];
+  selectedIncChildren("#procResultChildren").split(",").filter(Boolean).forEach((id) => {
+    const hijo = procOracleLookup.hijos.find((h) => String(h.cliente_id) === id);
+    if (hijo) clientes.push({ cliente_id: hijo.cliente_id, nombre: hijo.nombre });
+  });
+  try {
+    const result = await api(`/api/peru/processes/${processId}/oracle-clientes`, {
+      method: "POST", body: form({ clientes: JSON.stringify(clientes) }),
+    });
+    toast(result.omitidos.length
+      ? `Agregados: ${result.agregados.length}. Ya estaban asociados: ${result.omitidos.length}.`
+      : `Agregados: ${result.agregados.length}.`, true);
+    $("#procClienteIdInput").value = "";
+    $("#procClientPicker").value = "";
+    $("#procClienteResult").innerHTML = "";
+    procOracleLookup = null;
+    loadProcOracleClientes(processId);
+  } catch (err) {
+    showErrorPopup(err.message);
+  }
 }
 $("#procSearch").addEventListener("input", () => { clearTimeout(procSearchTimer); procSearchTimer = setTimeout(loadProcesses, 280); });
 $("#procClientFilter").addEventListener("change", loadProcesses);
@@ -887,11 +1073,62 @@ $("#deleteAllProc").addEventListener("click", () => {
 /* ============================================================
    INCLUSIONES
    ============================================================ */
+/* Documento (tipoDocumento/numeroDocumento/codigo/fechaEmision/fechaNacimiento) es
+   OPCIONAL: si los 5 campos quedan vacios el servidor manda un documento por defecto
+   (ver app.py:DEFAULT_DOCUMENTO); en cuanto se llena alguno, se exige el resto con las
+   mismas reglas de siempre. Se comparte entre Individual y Masivo. */
+function readDocumentoFields(prefix) {
+  // El checkbox "Elegir datos del documento" oculta el formulario por defecto; si esta
+  // apagado se ignora lo que haya quedado escrito (residuo de un toggle previo) y se
+  // manda todo vacio, para que el servidor use el documento por defecto sin excepciones.
+  if (!$(`#${prefix}DocumentoToggle`).checked) {
+    return { tipoDocumento: "", numeroDocumento: "", codigo: "", fechaEmision: "", fechaNacimiento: "" };
+  }
+  return {
+    tipoDocumento: $(`#${prefix}TipoDocumento`).value,
+    numeroDocumento: $(`#${prefix}NumeroDocumento`).value.trim(),
+    codigo: $(`#${prefix}Codigo`).value.trim(),
+    fechaEmision: $(`#${prefix}FechaEmision`).value,
+    fechaNacimiento: $(`#${prefix}FechaNacimiento`).value,
+  };
+}
+function validateDocumentoFields(d) {
+  const { tipoDocumento, numeroDocumento, codigo, fechaEmision, fechaNacimiento } = d;
+  const algunoLleno = tipoDocumento || numeroDocumento || codigo || fechaEmision || fechaNacimiento;
+  if (!algunoLleno) return null; // nada lleno: el servidor usa el documento por defecto
+  if (!tipoDocumento) return "El tipo de documento es obligatorio si vas a llenar el documento";
+  if (!numeroDocumento) return "El número de documento es obligatorio si vas a llenar el documento";
+  if (!/^\d+$/.test(numeroDocumento)) return "El número de documento debe ser numérico";
+  if (!fechaEmision) return "La fecha de emisión es obligatoria si vas a llenar el documento";
+  if (!fechaNacimiento) return "La fecha de nacimiento es obligatoria si vas a llenar el documento";
+  if (tipoDocumento === "DNI") {
+    if (numeroDocumento.length !== 8) return "El DNI debe tener 8 dígitos numéricos.";
+    if (!codigo) return "El código es obligatorio";
+    if (!/^\d+$/.test(codigo)) return "El código debe ser numérico";
+  } else if (tipoDocumento === "CE") {
+    if (numeroDocumento.length < 9 || numeroDocumento.length > 12) {
+      return "El Carné de Extranjería debe tener entre 9 y 12 dígitos.";
+    }
+  }
+  const hoy = new Date().toISOString().slice(0, 10);
+  if (fechaEmision > hoy) return "La fecha de emisión no puede ser una fecha futura";
+  if (fechaNacimiento > hoy) return "La fecha de nacimiento no puede ser una fecha futura";
+  if (fechaNacimiento > fechaEmision) return "La fecha de nacimiento no puede ser posterior a la fecha de emisión";
+  return null;
+}
+
 $("#incTipoDocumento").addEventListener("change", (e) => {
   const esDni = e.target.value === "DNI";
   $("#incCodigoWrap").hidden = !esDni;
   if (!esDni) $("#incCodigo").value = "";
 });
+$("#incBulkTipoDocumento").addEventListener("change", (e) => {
+  const esDni = e.target.value === "DNI";
+  $("#incBulkCodigoWrap").hidden = !esDni;
+  if (!esDni) $("#incBulkCodigo").value = "";
+});
+$("#incDocumentoToggle").addEventListener("change", (e) => { $("#incDocumentoFields").hidden = !e.target.checked; });
+$("#incBulkDocumentoToggle").addEventListener("change", (e) => { $("#incBulkDocumentoFields").hidden = !e.target.checked; });
 
 $("#inclusionForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -899,37 +1136,20 @@ $("#inclusionForm").addEventListener("submit", async (e) => {
   const demandante = $("#incDemandante").value.trim();
   const demandado = $("#incDemandado").value.trim();
   const valorParte = $("#incValorParte").value.trim();
-  const tipoDocumento = $("#incTipoDocumento").value;
-  const numeroDocumento = $("#incNumeroDocumento").value.trim();
-  const codigo = $("#incCodigo").value.trim();
-  const fechaEmision = $("#incFechaEmision").value;
-  const fechaNacimiento = $("#incFechaNacimiento").value;
+  const clientId = $("#incClient").value;
   if (!radicado) return toast("El radicado es obligatorio");
   if (!demandante) return toast("El demandante es obligatorio");
   if (!demandado) return toast("El demandado es obligatorio");
-  if (!tipoDocumento) return toast("El tipo de documento es obligatorio");
-  if (!numeroDocumento) return toast("El número de documento es obligatorio");
-  if (!/^\d+$/.test(numeroDocumento)) return toast("El número de documento debe ser numérico");
-  if (!fechaEmision) return toast("La fecha de emisión es obligatoria");
-  if (!fechaNacimiento) return toast("La fecha de nacimiento es obligatoria");
-  if (tipoDocumento === "DNI") {
-    if (numeroDocumento.length !== 8) return toast("El DNI debe tener 8 dígitos numéricos.");
-    if (!codigo) return toast("El código es obligatorio");
-    if (!/^\d+$/.test(codigo)) return toast("El código debe ser numérico");
-  } else if (tipoDocumento === "CE") {
-    if (numeroDocumento.length < 9 || numeroDocumento.length > 12) {
-      return toast("El Carné de Extranjería debe tener entre 9 y 12 dígitos.");
-    }
-  }
-  const hoy = new Date().toISOString().slice(0, 10);
-  if (fechaEmision > hoy) return toast("La fecha de emisión no puede ser una fecha futura");
-  if (fechaNacimiento > hoy) return toast("La fecha de nacimiento no puede ser una fecha futura");
-  if (fechaNacimiento > fechaEmision) return toast("La fecha de nacimiento no puede ser posterior a la fecha de emisión");
+  if (!clientId) return toast("Selecciona un cliente");
+  const documento = readDocumentoFields("inc");
+  const docError = validateDocumentoFields(documento);
+  if (docError) return toast(docError);
   try {
     const run = await api("/api/peru/inclusiones", { method: "POST", body: form({
-      radicado, demandante, demandado, valor_parte: valorParte, client_id: $("#incClient").value || null,
-      tipo_documento: tipoDocumento, numero_documento: numeroDocumento, codigo,
-      fecha_emision: fechaEmision, fecha_nacimiento: fechaNacimiento,
+      radicado, demandante, demandado, valor_parte: valorParte, client_id: clientId,
+      tipo_documento: documento.tipoDocumento, numero_documento: documento.numeroDocumento, codigo: documento.codigo,
+      fecha_emision: documento.fechaEmision, fecha_nacimiento: documento.fechaNacimiento,
+      hijo_ids: selectedIncChildren("#incChildren"),
     }) });
     openConsole({ name: radicado, row_count: 1 }, "inclusion", run.id);
     streamRun(run.id);
@@ -950,7 +1170,7 @@ $("#inclusionTabs").addEventListener("click", (e) => {
   const masivo = b.dataset.val === "masivo";
   $("#inclusionForm").hidden = masivo;
   $("#inclusionBulkForm").hidden = !masivo;
-  if (masivo) fillClientSelect("#incBulkClient");
+  if (masivo) fillClientSelectForInclusion("#incBulkClient");
 });
 /* carga masiva por Excel dentro de Inclusiones */
 (function wireIncDropzone() {
@@ -966,13 +1186,21 @@ async function bulkInclude(file) {
   const clientId = $("#incBulkClient").value;
   if (!clientId) return toast("Selecciona el cliente destino primero");
   if (!/\.xlsx?$/i.test(file.name)) return toast("Debe ser un archivo Excel (.xlsx)");
+  const hijoIds = selectedIncChildren("#incBulkChildren");
+  const documento = readDocumentoFields("incBulk");
+  const docError = validateDocumentoFields(documento);
+  if (docError) return toast(docError);
   toast("Cargando base y detectando columnas…", true);
   try {
     const base = await api(`/api/peru/clients/${clientId}/bases`, { method: "POST", body: form({ name: file.name.replace(/\.[^.]+$/, ""), file }) });
     $("#incFileInput").value = "";
     showConfirmPopup(`Se detectaron ${base.row_count} radicados. ¿Iniciar la consulta TOTAL y crear las cards?`, async () => {
       try {
-        const run = await api(`/api/peru/bases/${base.id}/run`, { method: "POST", body: form({ mode: "total" }) });
+        const run = await api(`/api/peru/bases/${base.id}/run`, { method: "POST", body: form({
+          mode: "total", hijo_ids: hijoIds,
+          tipo_documento: documento.tipoDocumento, numero_documento: documento.numeroDocumento, codigo: documento.codigo,
+          fecha_emision: documento.fechaEmision, fecha_nacimiento: documento.fechaNacimiento,
+        }) });
         openConsole({ name: base.name, row_count: base.row_count }, "total", run.id);
         streamRun(run.id);
         loadClients();

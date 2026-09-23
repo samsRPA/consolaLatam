@@ -4,9 +4,19 @@ propio. El bot consulta el portal CEJ por su cuenta (via RabbitMQ) y responde de
 sincrona con los expedientes encontrados.
 
 Endpoints del bot (documentados por quien lo opera, no forman parte de este repo):
-  POST {BASE_URL}/api/v3/radicadosCEJ/{caseNumber}/incluir   (JSON demandante/demandado/valorParte?)
-  POST {BASE_URL}/api/v3/radicadosCEJ/inclusiones            (multipart file, columnas fijas
+  POST {BASE_URL}/api/v3/radicadosCEJ/{caseNumber}/incluir   (JSON demandante/demandado/valorParte?/clientes?)
+  POST {BASE_URL}/api/v3/radicadosCEJ/inclusiones            (multipart file + clientes? -- columnas fijas
        radicado|demandante|demandado|valorParte desde la fila 2)
+
+`clientes` es un arreglo de {"clienteId": int, "nombreCliente": str}: el cliente padre
+elegido en la consola (obligatorio, igual que en Ecuador) mas los hijos que el usuario
+haya marcado con checkbox (opcionales). Los valores salen de external_client_id/
+external_username del cliente y de client_children (ver app.py:_build_clientes_payload y
+db.py); nombreCliente es siempre el nombre oficial que trae Oracle, no uno escrito a mano.
+
+`documento` (tipoDocumento/numeroDocumento/codigo/fechaEmision/fechaNacimiento) tambien es
+opcional en ambos: si el usuario no llena el formulario se manda un documento por defecto
+fijo (ver app.py:DEFAULT_DOCUMENTO) en vez de bloquear la inclusion.
 
 Ambos responden con:
   {"batchId": "...", "total": N,
@@ -22,6 +32,7 @@ esperando para siempre aunque el bot si lo haga."""
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -93,7 +104,8 @@ def _post_with_retry(url: str, *, timeout: float, **kwargs: Any) -> dict:
 
 def incluir_individual(
     radicado: str, demandante: str, demandado: str, valor_parte: str = "",
-    documento: dict[str, Any] | None = None, timeout: float = INDIVIDUAL_TIMEOUT,
+    documento: dict[str, Any] | None = None, clientes: list[dict] | None = None,
+    timeout: float = INDIVIDUAL_TIMEOUT,
 ) -> dict:
     url = f"{BASE_URL}/api/v3/radicadosCEJ/{radicado}/incluir"
     payload: dict[str, Any] = {"demandante": demandante, "demandado": demandado}
@@ -101,35 +113,27 @@ def incluir_individual(
         payload["valorParte"] = valor_parte
     if documento:
         payload.update(documento)
+    if clientes:
+        payload["clientes"] = clientes
     return _post_with_retry(url, timeout=timeout, json=payload)
 
 
-def incluir_bulk(file_bytes: bytes, filename: str, timeout: float = BULK_TIMEOUT) -> dict:
+def incluir_bulk(
+    file_bytes: bytes, filename: str, clientes: list[dict] | None = None,
+    documento: dict[str, Any] | None = None, timeout: float = BULK_TIMEOUT,
+) -> dict:
+    """`documento` (tipoDocumento/numeroDocumento/codigo/fechaEmision/fechaNacimiento) se
+    manda como campos planos del multipart, igual que en incluir_individual -- aplica como
+    valor por defecto para todo el lote (las columnas propias del Excel, si las trae, son
+    las que el bot realmente usa fila por fila; ver modulo docstring)."""
     url = f"{BASE_URL}/api/v3/radicadosCEJ/inclusiones"
     files = {"file": (filename, file_bytes)}
-    return _post_with_retry(url, timeout=timeout, files=files)
-
-
-def extract_cases(response: dict) -> list[dict]:
-    """Aplana la respuesta del bot: 'radicados' es una lista de entradas, cada una con su
-    propia lista 'cases' (normalmente 0 o 1, pero el bot admite mas de un expediente por
-    radicado)."""
-    cases: list[dict] = []
-    for entry in response.get("radicados") or []:
-        cases.extend(entry.get("cases") or [])
-    return cases
-
-
-DOCUMENTO_KEYS = ("tipoDocumento", "numeroDocumento", "codigo", "fechaEmision", "fechaNacimiento")
-
-
-def documento_fields(source: dict) -> dict:
-    """Extrae tipoDocumento/numeroDocumento/codigo/fechaEmision/fechaNacimiento cuando el
-    bot los hace eco en su respuesta -- tanto en un caso exitoso (junto a courtOfficeCode/
-    caseReport) como en una entrada fallida de 'radicados' (junto a error/radicado/
-    demandante/demandado/valorParte). Se guardan en detail para que el Excel de salida y
-    la vista de proceso los muestren."""
-    return {k: source[k] for k in DOCUMENTO_KEYS if source.get(k) is not None}
+    data: dict[str, str] = {}
+    if clientes:
+        data["clientes"] = json.dumps(clientes, ensure_ascii=False)
+    if documento:
+        data.update({k: str(v) for k, v in documento.items()})
+    return _post_with_retry(url, timeout=timeout, files=files, data=data or None)
 
 
 def party_names(actors_rama: list[dict], tipo: str) -> str:
@@ -143,11 +147,19 @@ def party_names(actors_rama: list[dict], tipo: str) -> str:
     return "; ".join(names)
 
 
-def persist_case(case: dict, client_id: int | None, source: str = "peru_bot") -> dict:
+def persist_case(case: dict, client_id: int | None, source: str = "peru_bot", error: str = "") -> dict:
     """Guarda/actualiza UN caso devuelto por el bot como proceso en 'Mis Procesos'. Sin
     actuaciones ni historial (el bot no los entrega): el detalle guardado es solo
-    despacho + caseReport + partes, para que el Excel y la vista de proceso lo usen tal
-    cual (ver excel_writer.write_peru_bot_processes_workbook)."""
+    despacho + caseReport + partes + procesoId + error, para que el Excel y la vista de
+    proceso lo usen tal cual (ver excel_writer.write_peru_bot_processes_workbook). El
+    documento consultado (numeroDocumento/codigo/fechaEmision/fechaNacimiento/
+    tipoDocumento) NO se guarda aca: es un dato de identidad usado solo para pasar la
+    validacion RENIEC del bot, no informacion del proceso en si -- no debe aparecer en
+    'Mis Procesos' ni en el Excel de salida.
+
+    `error`: el bot puede encontrar el expediente Y devolver un error igual (ej. "no se
+    pudo resolver el tipo de proceso"); el llamador lo pasa aca para que quede visible en
+    'Mis Procesos' -- igual que Ecuador (ver ecuador_client.persist_radicado)."""
     radicado = str(case.get("radicado", "")).strip()
     despacho = clean_text(case.get("courtOfficeCode", ""))
     reporte = case.get("caseReport") or {}
@@ -159,7 +171,11 @@ def persist_case(case: dict, client_id: int | None, source: str = "peru_bot") ->
         "despacho": despacho,
         "valorParte": clean_text(case.get("valorParte", "")),
         "actorsRama": actores,
-        **documento_fields(case),
+        # procesoId: id que el bot asigna en Oracle al incluirlo (ver
+        # app.py:_process_oracle_id) -- habilita la seccion "Clientes asociados (Oracle)"
+        # en la vista de proceso, igual que en Ecuador (ver ecuador_client.persist_radicado).
+        "procesoId": case.get("procesoId"),
+        "error": error,
     }
     return db.upsert_process(
         client_id=client_id,
@@ -173,4 +189,30 @@ def persist_case(case: dict, client_id: int | None, source: str = "peru_bot") ->
         nro_registro=str(case.get("nroRegistro", "") or ""),
         detail=detail,
         source=source,
+    )
+
+
+def persist_error(radicado: str, demandante: str, demandado: str, client_id: int | None, error: str) -> dict:
+    """Guarda el error que devolvio el bot para que quede visible en 'Mis Procesos' en vez
+    de perderse en un toast -- igual que Ecuador (ver ecuador_client.persist_radicado, que
+    siempre guarda el radicado con su 'error' tal cual venga). Si el radicado ya existia
+    con datos buenos de una consulta anterior, se conservan: solo se agrega/actualiza la
+    clave 'error' encima del detail existente, nunca se reemplaza entero (upsert_process SI
+    reemplaza detail_json completo, por eso el merge se hace aca antes de llamarlo)."""
+    radicado = radicado.strip()
+    existing = db.find_process(client_id, radicado)
+    detail = dict((existing or {}).get("detail") or {})
+    detail["error"] = error
+    return db.upsert_process(
+        client_id=client_id,
+        radicado=radicado,
+        matched_radicado=radicado,
+        demandante=(existing or {}).get("demandante") or demandante,
+        demandado=(existing or {}).get("demandado") or demandado,
+        organo=(existing or {}).get("organo", ""),
+        materia=(existing or {}).get("materia", ""),
+        estado=(existing or {}).get("estado", ""),
+        nro_registro=(existing or {}).get("nro_registro", ""),
+        detail=detail,
+        source="peru_bot",
     )

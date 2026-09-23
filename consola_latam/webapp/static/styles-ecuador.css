@@ -187,6 +187,9 @@ textarea.field { resize: vertical; }
 .fieldlabel .req { color: var(--danger); text-transform: none; letter-spacing: 0; font-weight: 700; margin-left: 6px; }
 .fieldlabel .field { margin-top: 6px; }
 .hint { font-size: 13px; color: var(--rock); margin: 4px 0 14px; }
+.checktoggle { display: flex; align-items: center; gap: 8px; margin: 4px 0 14px; font-size: 13px; font-weight: 600; color: var(--deep); cursor: pointer; user-select: none; }
+.checktoggle input[type="checkbox"] { width: 15px; height: 15px; flex-shrink: 0; accent-color: var(--olive); }
+.checktoggle .hint { margin: 0; font-weight: 400; }
 .formgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
 .segmented { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-control); overflow: hidden; margin-bottom: 12px; background: var(--white); }
@@ -272,6 +275,25 @@ textarea.field { resize: vertical; }
 .historyrow__counts { color: var(--rock); }
 .historyrow__counts b { color: var(--green-strategic); }
 .historyrow__date { margin-left: auto; color: var(--rock); font-size: 12px; }
+
+/* Encabezado de seccion con boton a la derecha (ej. "Clientes hijos" + Actualizar). */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 30px 0 14px; flex-wrap: wrap; }
+.section-head .ledger--section { margin: 0; }
+
+/* Clientes hijos (Oracle): puede haber cientos, asi que van en grilla compacta y con
+   scroll propio en vez de una fila por cliente (una lista vertical de 300 items no cabe
+   nunca en pantalla). El nombre nunca se trunca (algunos son muy largos): se deja envolver
+   en varias lineas y la fila crece con el, en vez de recortarlo con "...". */
+.childrenlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; padding: 2px 6px 2px 2px; align-items: start; }
+.childrow { display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; background: var(--white); border: 1px solid var(--line); border-radius: var(--radius-base); font-size: 12.5px; min-width: 0; }
+.childrow__name { color: var(--forest); font-weight: 600; white-space: normal; overflow-wrap: break-word; }
+.childrow__id { color: var(--rock); font-size: 11px; }
+
+/* Variante con checkbox (seleccion de clientes hijos en Inclusiones). */
+.childrow--check { cursor: pointer; user-select: none; flex-direction: row; align-items: flex-start; justify-content: space-between; }
+.childrow--check .childrow__check { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.childrow--check input[type="checkbox"] { flex-shrink: 0; width: 15px; height: 15px; margin-top: 1px; accent-color: var(--olive); }
+.childrow--check .childrow__id { flex-shrink: 0; margin-left: 8px; }
 
 /* ---------- MIS PROCESOS ---------- */
 .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 22px; flex-wrap: wrap; }

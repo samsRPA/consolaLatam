@@ -53,7 +53,10 @@ class RunManager:
     def active_run_id(self) -> int | None:
         return self._active_run_id
 
-    def start_run(self, base_id: int, mode: str, sede: str) -> dict[str, Any]:
+    def start_run(
+        self, base_id: int, mode: str, sede: str,
+        clientes: list[dict] | None = None, documento: dict | None = None,
+    ) -> dict[str, Any]:
         db.set_sede(sede)
         base = db.get_base(base_id)
         if not self._lock.acquire(blocking=False):
@@ -79,7 +82,7 @@ class RunManager:
 
         thread = threading.Thread(
             target=self._execute,
-            args=(sede, run_id, base, mode, mapping),
+            args=(sede, run_id, base, mode, mapping, clientes, documento),
             daemon=True,
         )
         thread.start()
@@ -152,7 +155,7 @@ class RunManager:
 
     def start_inclusion(
         self, radicado: str, demandante: str, demandado: str, client_id: int | None, sede: str,
-        valor_parte: str = "", documento: dict | None = None,
+        valor_parte: str = "", documento: dict | None = None, clientes: list[dict] | None = None,
     ) -> dict[str, Any]:
         """Modulo Inclusiones: consulta UN expediente por radicado + parte, lo persiste y
         crea su card. Comparte el candado de una-consulta-a-la-vez con las corridas masivas."""
@@ -172,7 +175,7 @@ class RunManager:
             raise
         thread = threading.Thread(
             target=self._execute_single,
-            args=(sede, radicado, demandante, demandado, client_id, "inclusion", valor_parte, documento),
+            args=(sede, radicado, demandante, demandado, client_id, "inclusion", valor_parte, documento, clientes),
             daemon=True,
         )
         thread.start()
@@ -207,14 +210,14 @@ class RunManager:
 
     def _execute_single(
         self, sede: str, radicado, demandante, demandado, client_id, scope, valor_parte: str = "",
-        documento: dict | None = None,
+        documento: dict | None = None, clientes: list[dict] | None = None,
     ) -> None:
         db.set_sede(sede)  # hilo nuevo: el ContextVar de la sede no se hereda solo
         rid = -1
         self._publish(sede, rid, {"type": "case_started", "index": 1, "total": 1,
                             "radicado": radicado, "parte": demandante or demandado})
         try:
-            result = peru_bot_runner.consult_single(radicado, demandante, demandado, valor_parte, client_id, documento)
+            result = peru_bot_runner.consult_single(radicado, demandante, demandado, valor_parte, client_id, documento, clientes)
             proc = result["process"]
             process_ids = ",".join(str(p["id"]) for p in result.get("processes") or [])
             db.add_query_history(client_id, scope=scope, mode="total", total=1, con_mov=0, sin_mov=0,
@@ -247,7 +250,10 @@ class RunManager:
         event.set()
         self._publish(sede, run_id, {"type": "cancel_requested"})
 
-    def _execute(self, sede: str, run_id: int, base: dict, mode: str, mapping: ColumnMapping) -> None:
+    def _execute(
+        self, sede: str, run_id: int, base: dict, mode: str, mapping: ColumnMapping,
+        clientes: list[dict] | None = None, documento: dict | None = None,
+    ) -> None:
         db.set_sede(sede)  # hilo nuevo: el ContextVar de la sede no se hereda solo
         key: RunKey = (sede, run_id)
         base_path = Path(base["stored_path"])
@@ -286,6 +292,8 @@ class RunManager:
                 filename=base.get("original_filename") or base_path.name,
                 progress_callback=on_progress,
                 cancel_event=cancel_event,
+                clientes=clientes,
+                documento=documento,
             )
             ok = self._last_event.get(key, {}).get("ok", 0)
             status = "cancelled" if cancel_event.is_set() else "done"

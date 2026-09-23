@@ -36,7 +36,9 @@ def _persist_bot_cases(case: InputCase, entry: dict, client_id: int | None) -> l
     esa fila de "radicados" (mas confiable que lo enviado, que es justo lo que no pudo usar)."""
     bot_cases = entry.get("cases") or []
     if bot_cases:
-        return [peru_client.persist_case(bc, client_id) for bc in bot_cases]
+        # Un entry puede traer casos Y un error a la vez (ver
+        # peru_bot_runner.consult_single para el mismo caso en Inclusiones individual).
+        return [peru_client.persist_case(bc, client_id, error=entry.get("error") or "") for bc in bot_cases]
     radicado = entry.get("radicado") or case.radicado
     demandante = entry.get("demandante") or case.demandante
     demandado = entry.get("demandado") or case.demandado
@@ -50,7 +52,7 @@ def _persist_bot_cases(case: InputCase, entry: dict, client_id: int | None) -> l
         "id": existing["id"] if existing else None,
         "radicado": radicado, "client_name": (existing or {}).get("client_name", ""),
         "organo": "", "demandante": demandante, "demandado": demandado,
-        "detail": {"valorParte": valor_parte, "error": error, **peru_client.documento_fields(entry)},
+        "detail": {"valorParte": valor_parte, "error": error},
     }]
 
 
@@ -67,7 +69,6 @@ def _invalid_row_result(item: dict) -> dict:
         "demandado": (item.get("demandado") or "").strip(),
         "detail": {
             "valorParte": (item.get("valorParte") or "").strip(), "error": item.get("reason", ""),
-            **peru_client.documento_fields(item),
         },
     }
 
@@ -80,6 +81,8 @@ def run_bulk(
     filename: str,
     progress_callback: ProgressCallback | None = None,
     cancel_event: threading.Event | None = None,
+    clientes: list[dict] | None = None,
+    documento: dict | None = None,
 ) -> Path:
     def emit(event: dict) -> None:
         if progress_callback is not None:
@@ -103,7 +106,7 @@ def run_bulk(
     # numeroDocumento, codigo, fechaEmision, fechaNacimiento, tipoDocumento) directo del
     # archivo, y esos campos de documento no existen en `InputCase`/`cases` (ver
     # base_reader.py) -- reconstruir el archivo aca los perdia por completo.
-    response = peru_client.incluir_bulk(file_bytes, filename)
+    response = peru_client.incluir_bulk(file_bytes, filename, clientes=clientes, documento=documento)
 
     radicados_out = response.get("radicados") or []
     invalid_out = response.get("invalid") or []
@@ -151,28 +154,32 @@ def run_bulk(
 
 def consult_single(
     radicado: str, demandante: str, demandado: str, valor_parte: str, client_id: int | None,
-    documento: dict | None = None,
+    documento: dict | None = None, clientes: list[dict] | None = None,
 ) -> dict:
     """Usado tanto por Inclusiones (individual) como por 'Consulta Unica' (re-consultar
     un proceso ya guardado): sin actuaciones no hay diferencia real entre ambos casos,
     en los dos se llama al bot y se refresca/crea el proceso con lo que devuelva."""
-    response = peru_client.incluir_individual(radicado, demandante, demandado, valor_parte, documento)
-    bot_cases = peru_client.extract_cases(response)
-    if bot_cases:
-        procs = [peru_client.persist_case(bc, client_id) for bc in bot_cases]
-        return {"status": "OK", "process": procs[0], "processes": procs, "error": ""}
+    response = peru_client.incluir_individual(radicado, demandante, demandado, valor_parte, documento, clientes)
+    entries = response.get("radicados") or []
+    # Un "entry" puede traer casos Y un error a la vez (ej. "no se pudo resolver el tipo de
+    # proceso para OBLIGACION DE DAR SUMA DE DINERO"): se guarda ese error junto a cada
+    # caso encontrado en vez de descartarlo (ver peru_client.persist_case).
+    found = [(bc, entry.get("error") or "") for entry in entries for bc in (entry.get("cases") or [])]
+    if found:
+        procs = [peru_client.persist_case(bc, client_id, error=err) for bc, err in found]
+        # El expediente SI se encontro y se guardo (status OK); el error -- si vino uno --
+        # solo se reporta para el tooltip del log en vivo, no cambia el resultado.
+        overall_error = next((err for _, err in found if err), "")
+        return {"status": "OK", "process": procs[0], "processes": procs, "error": overall_error}
     # "message" es el resumen legible que arma el bot (ver InclusionRowDto /
     # _flagIfScraperFailed); en un lote de 1 (inclusion individual) coincide con el
     # "error" de la unica fila en "radicados", que se usa aqui como respaldo si el bot
     # no llega a mandar el resumen (p.ej. RENIEC no encontro coincidencia).
-    entries = response.get("radicados") or []
     row_error = entries[0].get("error") if entries else None
     error = response.get("message") or row_error or "El bot no pudo obtener informacion de este radicado."
-    # Si falla, no se toca 'Mis Procesos': una Inclusion nueva que falla no debe aparecer
-    # ahi (no hay expediente real), y si es una Consulta Unica sobre un proceso YA
-    # existente, se deja tal cual (upsert_process pisaria detail_json entero, borrando el
-    # reporte bueno de la ultima consulta exitosa solo porque esta puntual fallo).
-    existing = db.find_process(client_id, radicado)
-    proc = existing or {"id": None, "radicado": radicado, "demandante": demandante, "demandado": demandado}
+    # Se guarda el error en 'Mis Procesos' para poder revisarlo despues -- igual que
+    # Ecuador (ver peru_client.persist_error). Si el radicado ya tenia datos buenos de una
+    # consulta anterior, se conservan: solo se le agrega/actualiza la clave 'error' encima.
+    proc = peru_client.persist_error(radicado, demandante, demandado, client_id, error)
     db.create_notification("error", f"ERROR: {radicado}", error, radicado, proc.get("id"), client_id)
     return {"status": "ERROR", "process": proc, "processes": [], "error": error}
